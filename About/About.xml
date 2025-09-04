@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <name>Perfect Placement</name>
+  <packageId>remi.perfectplacement</packageId>
+  <author></author>
+  <supportedVersions>
+    <li>1.6</li>
+  </supportedVersions>
+  <description>
+     This mod enhances object placement by allowing you to rotate objects with the mouse 
+     before placing them. It also provides options to either keep the original rotation when 
+     reinstalling or to force a specific rotation for any build, install, or reinstall action.
+  </description>
+  <modDependencies>
+    <li>
+      <packageId>brrainz.harmony</packageId>
+      <displayName>Harmony</displayName>
+    </li>
+  </modDependencies>
+  <loadAfter>
+    <li>brrainz.harmony</li>
+  </loadAfter>
+</ModMetaData>
