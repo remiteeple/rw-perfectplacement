@@ -65,8 +65,8 @@
     <GameVersion Condition="'$(GameVersion)' == '' and '$(_CfgVersion)' != ''">$(_CfgVersion)</GameVersion>
   </PropertyGroup>
 
-  <!-- Set OutputPath after GameVersion is known; fallback to ../Assemblies when unknown -->
-  <PropertyGroup>
+  <!-- Set OutputPath only for real builds (avoid creating folders on solution load/design-time builds) -->
+  <PropertyGroup Condition="'$(DesignTimeBuild)' != 'true'">
     <_ComputedOutput>..\$(GameVersion)\Assemblies\</_ComputedOutput>
     <_ComputedOutput Condition="'$(GameVersion)' == ''">..\Assemblies\</_ComputedOutput>
     <OutputPath Condition="'$(OutputPath)' == ''">$(_ComputedOutput)</OutputPath>
