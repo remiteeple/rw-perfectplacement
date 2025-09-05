@@ -426,3 +426,8 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# Assembly Files
+1.4/
+1.5/
+1.6/
