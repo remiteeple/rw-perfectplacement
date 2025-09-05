@@ -12,7 +12,6 @@ namespace PerfectPlacement
     [HarmonyPatch]
     public static class Patch_Designator_Place_get_placingRot
     {
-        // Dynamically resolve getter to support API changes (placingRot -> PlacingRot)
         static System.Reflection.MethodBase TargetMethod()
         {
             var t = typeof(Designator_Place);
@@ -119,6 +118,8 @@ namespace PerfectPlacement
             if (settings == null) return true;
             // Allow callers to bypass pinning (e.g., when computing rotation from real cursor)
             if (Utilities.SuppressMouseCellPin) return true;
+            // Fast early-out: if nothing is pinned, no override needed
+            if (!Utilities.HasAnyPinned) return true;
             try
             {
                 var des = Utilities.CurrentSelectedDesignator();
@@ -144,6 +145,8 @@ namespace PerfectPlacement
             // Reset initial-apply flag on selection so a reused designator gets a fresh initial rotation
             Utilities.UnmarkApplied(des);
             Utilities.ClearPinned(des);
+            Utilities.ClearRotatableCache();
+            Utilities.ClearTransientAll();
         }
     }
 
@@ -533,6 +536,8 @@ namespace PerfectPlacement
         {
             try
             {
+                // Fast early-out: if nothing is pinned, run original
+                if (!Utilities.HasAnyPinned) return true;
                 var des = Utilities.CurrentSelectedDesignator();
                 if (des == null) return true;
 

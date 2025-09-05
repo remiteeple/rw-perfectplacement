@@ -2,35 +2,35 @@ using System;
 using System.Reflection;
 using System.Collections.Generic;
 using HarmonyLib;
+using System.Linq.Expressions;
 using RimWorld;
 using Verse;
 using UnityEngine;
 using Verse.Sound;
+using System.Runtime.CompilerServices;
 
 namespace PerfectPlacement
 {
     public static class Utilities
     {
         private const int MouseDeadzoneCells = 1; // small deadzone around pinned origin
-        private static readonly HashSet<Designator> AppliedOnce = new HashSet<Designator>();
+        private static readonly ConditionalWeakTable<Designator, object> AppliedOnce = new ConditionalWeakTable<Designator, object>();
         private static readonly Dictionary<Designator, IntVec3> PinnedCell = new Dictionary<Designator, IntVec3>();
         private static readonly HashSet<Designator> PlacementArmed = new HashSet<Designator>();
 
         // Cache for expensive reflection lookups
         private static readonly Dictionary<Type, Action<Designator, Rot4>> SetRotCache = new Dictionary<Type, Action<Designator, Rot4>>();
         private static readonly Dictionary<Type, Func<Designator, Rot4>> GetRotCache = new Dictionary<Type, Func<Designator, Rot4>>();
-        private static readonly object SetRotCacheLock = new object();
-        private static readonly object GetRotCacheLock = new object();
         private static readonly Dictionary<Type, Func<Designator, Thing>> InstallSourceCache = new Dictionary<Type, Func<Designator, Thing>>();
-        private static readonly object InstallSourceCacheLock = new object();
         private static readonly Dictionary<Type, Func<Designator, BuildableDef>> PlacingDefCache = new Dictionary<Type, Func<Designator, BuildableDef>>();
-        private static readonly object PlacingDefCacheLock = new object();
         [ThreadStatic]
         private static bool _allowSuccessSoundOnce;
         private static readonly Dictionary<Type, Func<Designator, SoundDef>> SuccessSoundGetterCache = new Dictionary<Type, Func<Designator, SoundDef>>();
-        private static readonly object SuccessSoundGetterCacheLock = new object();
+        private static readonly Dictionary<string, SoundDef> SoundCache = new Dictionary<string, SoundDef>();
         private static Func<Designator> _selectedGetter;
         private static bool _selectedGetterResolved;
+        private static readonly Dictionary<Type, Func<Designator>> SelectedGetterByMgrType = new Dictionary<Type, Func<Designator>>();
+        private static readonly Dictionary<Type, Func<Thing, Thing>> InnerThingGetterCache = new Dictionary<Type, Func<Thing, Thing>>();
 
         [ThreadStatic]
         private static bool _suppressMouseCellPin;
@@ -54,7 +54,10 @@ namespace PerfectPlacement
         }
 
         private static readonly Dictionary<Designator, IntVec3> LastMouseCell = new Dictionary<Designator, IntVec3>();
+        private static readonly Dictionary<Designator, bool> RotatableDesignatorCache = new Dictionary<Designator, bool>();
         private static readonly HashSet<Designator> KeyboardOverrideUntilMove = new HashSet<Designator>();
+
+        public static bool HasAnyPinned => PinnedCell.Count != 0;
 
         public static IntVec3 GetActualMouseCell()
         {
@@ -85,6 +88,8 @@ namespace PerfectPlacement
             try
             {
                 if (d == null) return false;
+                if (RotatableDesignatorCache.TryGetValue(d, out var cached)) return cached;
+                bool result = false;
                 // Install/Reinstall designator: inspect the actual thing being installed
                 if (d is Designator_Install)
                 {
@@ -93,17 +98,21 @@ namespace PerfectPlacement
                     {
                         var inner = TryGetInnerThing(src) ?? src;
                         var tdef = inner?.def as ThingDef;
-                        if (tdef != null) return tdef.rotatable;
+                        if (tdef != null) { result = tdef.rotatable; RotatableDesignatorCache[d] = result; return result; }
                     }
                     // Fallback to placing def if any
                     var pd = FindPlacingDef(d) as ThingDef;
-                    return pd != null && pd.rotatable;
+                    result = pd != null && pd.rotatable;
+                    RotatableDesignatorCache[d] = result;
+                    return result;
                 }
                 // Build/Place designators: check the placing BuildableDef
                 if (d is Designator_Build || d is Designator_Place)
                 {
                     var pd = FindPlacingDef(d) as ThingDef;
-                    return pd != null && pd.rotatable;
+                    result = pd != null && pd.rotatable;
+                    RotatableDesignatorCache[d] = result;
+                    return result;
                 }
             }
             catch { }
@@ -115,13 +124,10 @@ namespace PerfectPlacement
             if (d == null) return null;
             var t = d.GetType();
             Func<Designator, BuildableDef> getter;
-            lock (PlacingDefCacheLock)
+            if (!PlacingDefCache.TryGetValue(t, out getter))
             {
-                if (!PlacingDefCache.TryGetValue(t, out getter))
-                {
-                    getter = BuildPlacingDefGetter(t) ?? (_ => null);
-                    PlacingDefCache[t] = getter;
-                }
+                getter = BuildPlacingDefGetter(t) ?? (_ => null);
+                PlacingDefCache[t] = getter;
             }
             try { return getter(d); } catch { return null; }
         }
@@ -167,16 +173,16 @@ namespace PerfectPlacement
             return null;
         }
 
-        public static bool WasApplied(Designator d) => d != null && AppliedOnce.Contains(d);
+        public static bool WasApplied(Designator d) => d != null && AppliedOnce.TryGetValue(d, out _);
         public static void MarkApplied(Designator d)
         {
             if (d == null) return;
-            AppliedOnce.Add(d);
+            try { AppliedOnce.Add(d, new object()); } catch { }
         }
         public static void UnmarkApplied(Designator d)
         {
             if (d == null) return;
-            AppliedOnce.Remove(d);
+            try { AppliedOnce.Remove(d); } catch { }
         }
 
         public static bool TryGetPinned(Designator d, out IntVec3 cell)
@@ -194,6 +200,17 @@ namespace PerfectPlacement
         {
             if (d == null) return;
             PinnedCell.Remove(d);
+        }
+
+        public static void ClearRotatableCache()
+        {
+            RotatableDesignatorCache.Clear();
+        }
+
+        public static void ClearTransientAll()
+        {
+            LastMouseCell.Clear();
+            KeyboardOverrideUntilMove.Clear();
         }
 
         public static void ArmPlacement(Designator d)
@@ -226,6 +243,16 @@ namespace PerfectPlacement
                 var dm = Find.DesignatorManager;
                 if (dm == null) return null;
                 var t = dm.GetType();
+                if (!SelectedGetterByMgrType.TryGetValue(t, out var runtimeGetter) || runtimeGetter == null)
+                {
+                    runtimeGetter = BuildSelectedGetterForManagerType(t);
+                    SelectedGetterByMgrType[t] = runtimeGetter; // may be null
+                }
+                if (runtimeGetter != null)
+                {
+                    _selectedGetter = runtimeGetter;
+                    return _selectedGetter();
+                }
                 var p = AccessTools.Property(t, "Selected") ?? AccessTools.Property(t, "SelectedDesignator");
                 if (p != null && p.CanRead) return p.GetValue(dm, null) as Designator;
                 var f = AccessTools.Field(t, "selected") ?? AccessTools.Field(t, "selectedDesignator");
@@ -243,19 +270,72 @@ namespace PerfectPlacement
                 var p = AccessTools.Property(tMan, "Selected") ?? AccessTools.Property(tMan, "SelectedDesignator");
                 if (p != null && p.CanRead)
                 {
-                    return () =>
+                    var get = p.GetGetMethod(true);
+                    if (get != null)
                     {
-                        var dm = Find.DesignatorManager;
-                        return dm != null ? (p.GetValue(dm, null) as Designator) : null;
-                    };
+                        var del = AccessTools.MethodDelegate<Func<DesignatorManager, Designator>>(get);
+                        return () =>
+                        {
+                            var dm = Find.DesignatorManager;
+                            return dm != null ? del(dm) : null;
+                        };
+                    }
                 }
                 var f = AccessTools.Field(tMan, "selected") ?? AccessTools.Field(tMan, "selectedDesignator");
                 if (f != null)
                 {
+                    // Compile a typed field getter: (DesignatorManager m) => (Designator) ((<tMan>)m).<field>
+                    var param = Expression.Parameter(typeof(DesignatorManager), "m");
+                    var cast = Expression.Convert(param, tMan);
+                    var fieldAccess = Expression.Field(cast, f);
+                    var asDesignator = Expression.Convert(fieldAccess, typeof(Designator));
+                    var lambda = Expression.Lambda<Func<DesignatorManager, Designator>>(asDesignator, param).Compile();
                     return () =>
                     {
                         var dm = Find.DesignatorManager;
-                        return dm != null ? (f.GetValue(dm) as Designator) : null;
+                        return dm != null ? lambda(dm) : null;
+                    };
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private static Func<Designator> BuildSelectedGetterForManagerType(Type mgrType)
+        {
+            try
+            {
+                if (mgrType == null) return null;
+                // Try property first
+                var p = AccessTools.Property(mgrType, "Selected") ?? AccessTools.Property(mgrType, "SelectedDesignator");
+                if (p != null && p.CanRead)
+                {
+                    var get = p.GetGetMethod(true);
+                    if (get != null)
+                    {
+                        // Use object instance to be flexible across derived types
+                        var del = AccessTools.MethodDelegate<Func<object, Designator>>(get);
+                        return () =>
+                        {
+                            var dm = Find.DesignatorManager;
+                            return dm != null ? del(dm) : null;
+                        };
+                    }
+                }
+                // Then try field(s)
+                var f = AccessTools.Field(mgrType, "selected") ?? AccessTools.Field(mgrType, "selectedDesignator");
+                if (f != null)
+                {
+                    // Compile a field getter against the specific runtime type
+                    var paramObj = Expression.Parameter(typeof(object), "o");
+                    var cast = Expression.Convert(paramObj, mgrType);
+                    var fld = Expression.Field(cast, f);
+                    var asDesignator = Expression.Convert(fld, typeof(Designator));
+                    var compiled = Expression.Lambda<Func<object, Designator>>(asDesignator, paramObj).Compile();
+                    return () =>
+                    {
+                        var dm = Find.DesignatorManager;
+                        return dm != null ? compiled(dm) : null;
                     };
                 }
             }
@@ -268,13 +348,10 @@ namespace PerfectPlacement
             if (d == null) return false;
             var type = d.GetType();
             Action<Designator, Rot4> setter;
-            lock (SetRotCacheLock)
+            if (!SetRotCache.TryGetValue(type, out setter))
             {
-                if (!SetRotCache.TryGetValue(type, out setter))
-                {
-                    setter = BuildPlacingRotSetter(type);
-                    SetRotCache[type] = setter; // may be null if not found
-                }
+                setter = BuildPlacingRotSetter(type);
+                SetRotCache[type] = setter; // may be null if not found
             }
             if (setter != null)
             {
@@ -294,7 +371,8 @@ namespace PerfectPlacement
                     var f = AccessTools.Field(t, "placingRot");
                     if (f != null && f.FieldType == typeof(Rot4))
                     {
-                        return (des, rot) => f.SetValue(des, rot);
+                        var fieldRef = AccessTools.FieldRefAccess<Designator, Rot4>(f);
+                        return (des, rot) => { fieldRef(des) = rot; };
                     }
                     t = t.BaseType;
                 }
@@ -304,7 +382,12 @@ namespace PerfectPlacement
                     var p = AccessTools.Property(t, "placingRot") ?? AccessTools.Property(t, "PlacingRot");
                     if (p != null && p.CanWrite && p.PropertyType == typeof(Rot4))
                     {
-                        return (des, rot) => p.SetValue(des, rot, null);
+                        var set = p.GetSetMethod(true);
+                        if (set != null)
+                        {
+                            var del = AccessTools.MethodDelegate<Action<Designator, Rot4>>(set);
+                            return (des, rot) => del(des, rot);
+                        }
                     }
                     t = t.BaseType;
                 }
@@ -319,13 +402,10 @@ namespace PerfectPlacement
             if (d == null) return false;
             var type = d.GetType();
             Func<Designator, Rot4> getter;
-            lock (GetRotCacheLock)
+            if (!GetRotCache.TryGetValue(type, out getter))
             {
-                if (!GetRotCache.TryGetValue(type, out getter))
-                {
-                    getter = BuildPlacingRotGetter(type);
-                    GetRotCache[type] = getter; // may be null if not found
-                }
+                getter = BuildPlacingRotGetter(type);
+                GetRotCache[type] = getter; // may be null if not found
             }
             if (getter != null)
             {
@@ -344,7 +424,8 @@ namespace PerfectPlacement
                     var f = AccessTools.Field(t, "placingRot");
                     if (f != null && f.FieldType == typeof(Rot4))
                     {
-                        return des => (Rot4)f.GetValue(des);
+                        var fieldRef = AccessTools.FieldRefAccess<Designator, Rot4>(f);
+                        return des => fieldRef(des);
                     }
                     t = t.BaseType;
                 }
@@ -354,7 +435,12 @@ namespace PerfectPlacement
                     var p = AccessTools.Property(t, "placingRot") ?? AccessTools.Property(t, "PlacingRot");
                     if (p != null && p.CanRead && p.PropertyType == typeof(Rot4))
                     {
-                        return des => (Rot4)p.GetValue(des, null);
+                        var get = p.GetGetMethod(true);
+                        if (get != null)
+                        {
+                            var del = AccessTools.MethodDelegate<Func<Designator, Rot4>>(get);
+                            return des => del(des);
+                        }
                     }
                     t = t.BaseType;
                 }
@@ -377,13 +463,10 @@ namespace PerfectPlacement
             if (d == null) return null;
             var t = d.GetType();
             Func<Designator, Thing> getter;
-            lock (InstallSourceCacheLock)
+            if (!InstallSourceCache.TryGetValue(t, out getter))
             {
-                if (!InstallSourceCache.TryGetValue(t, out getter))
-                {
-                    getter = BuildInstallSourceGetter(t) ?? (_ => null);
-                    InstallSourceCache[t] = getter;
-                }
+                getter = BuildInstallSourceGetter(t) ?? (_ => null);
+                InstallSourceCache[t] = getter;
             }
             try { return getter(d); } catch { return null; }
         }
@@ -428,14 +511,46 @@ namespace PerfectPlacement
             if (thing == null) return null;
             try
             {
-                var mt = thing.GetType();
-                if (mt.Name == "MinifiedThing" || (mt.FullName?.Contains(".MinifiedThing") ?? false))
+                if (thing is MinifiedThing direct) return direct.InnerThing;
+
+                // Fallback: build and cache a compiled getter for this specific Thing type
+                var t = thing.GetType();
+                if (!InnerThingGetterCache.TryGetValue(t, out var getter) || getter == null)
                 {
-                    var p = AccessTools.Property(mt, "InnerThing");
-                    if (p != null && p.CanRead)
+                    getter = BuildInnerThingGetter(t);
+                    InnerThingGetterCache[t] = getter; // may be null
+                }
+                if (getter != null) return getter(thing);
+            }
+            catch { }
+            return null;
+        }
+
+        private static Func<Thing, Thing> BuildInnerThingGetter(Type t)
+        {
+            try
+            {
+                if (t == null) return null;
+                // Property named InnerThing
+                var p = AccessTools.Property(t, "InnerThing");
+                if (p != null && p.CanRead && typeof(Thing).IsAssignableFrom(p.PropertyType))
+                {
+                    var get = p.GetGetMethod(true);
+                    if (get != null)
                     {
-                        return p.GetValue(thing, null) as Thing;
+                        var del = AccessTools.MethodDelegate<Func<object, Thing>>(get);
+                        return th => th != null ? del(th) : null;
                     }
+                }
+                // Field named innerThing (less common but safe)
+                var f = AccessTools.Field(t, "innerThing") ?? AccessTools.Field(t, "InnerThing");
+                if (f != null && typeof(Thing).IsAssignableFrom(f.FieldType))
+                {
+                    var paramObj = Expression.Parameter(typeof(Thing), "th");
+                    var cast = Expression.Convert(paramObj, t);
+                    var fld = Expression.Field(cast, f);
+                    var asThing = Expression.Convert(fld, typeof(Thing));
+                    return Expression.Lambda<Func<Thing, Thing>>(asThing, paramObj).Compile();
                 }
             }
             catch { }
@@ -445,7 +560,7 @@ namespace PerfectPlacement
         public static Rot4 DirectionFromDelta(int dx, int dz)
         {
             if (dx == 0 && dz == 0) return default;
-            return Mathf.Abs(dx) >= Mathf.Abs(dz)
+            return Math.Abs(dx) >= Math.Abs(dz)
                 ? (dx >= 0 ? Rot4.East : Rot4.West)
                 : (dz >= 0 ? Rot4.North : Rot4.South);
         }
@@ -460,13 +575,14 @@ namespace PerfectPlacement
             bool mouseDownNow = (evt != null && evt.type == EventType.MouseDown && evt.button == 0) || Input.GetMouseButtonDown(0);
             if (mouseDownNow)
             {
-                if (!TryGetPinned(des, out var _))
+                if (!TryGetPinned(des, out var pinCell))
                 {
-                    var pin = GetActualMouseCell();
-                    SetPinned(des, pin);
+                    pinCell = GetActualMouseCell();
+                    SetPinned(des, pinCell);
                     PlayPinSound(des);
+                    // Suppress any immediate mouse-attachment warnings on the pin frame
+                    SuppressNextMouseAttachment();
                 }
-                TryGetPinned(des, out var pinCell);
                 var cur = GetActualMouseCell();
                 LastMouseCell[des] = cur;
                 int dx = cur.x - pinCell.x;
@@ -550,6 +666,7 @@ namespace PerfectPlacement
                     des.DesignateSingleCell(toPlace);
                     // Vanilla success sound may not play in this deferred path; play it explicitly.
                     PlayDesignateSuccessSound(des);
+                    UnmarkApplied(des);
                 }
                 else
                 {
@@ -563,6 +680,7 @@ namespace PerfectPlacement
                         }
                     }
                     catch { }
+                    UnmarkApplied(des);
                 }
                 ClearPinned(des);
                 LastMouseCell.Remove(des);
@@ -634,32 +752,45 @@ namespace PerfectPlacement
             return ApplyOverrideOnce(des, s.buildOverrideRotation);
         }
 
-        public static bool HandleProcessInputPrefix(Designator des, Event evt)
+        private static bool TryPinOnLeftClick(Designator des, Event evt)
         {
             var s = PerfectPlacement.Settings;
-            if (s == null) return true;
-            if (!MouseRotateEnabledFor(des, s)) return true;
-            if (evt == null) return true;
-            if (evt.type == EventType.MouseDown && evt.button == 0)
+            if (s == null) return false;
+            if (!MouseRotateEnabledFor(des, s)) return false;
+            bool mouseDownNow = (evt != null && evt.type == EventType.MouseDown && evt.button == 0) || Input.GetMouseButtonDown(0);
+            if (!mouseDownNow) return false;
+            if (!TryGetPinned(des, out var _))
             {
-                if (!TryGetPinned(des, out var _))
-                {
-                    var pin = GetActualMouseCell();
-                    SetPinned(des, pin);
-                    PlayPinSound(des);
-                    // Suppress any immediate mouse-attachment warnings on the pin frame
-                    SuppressNextMouseAttachment();
-                }
+                var pin = GetActualMouseCell();
+                SetPinned(des, pin);
+                PlayPinSound(des);
+                // Suppress any immediate mouse-attachment warnings on the pin frame
+                SuppressNextMouseAttachment();
+            }
+            if (evt != null && evt.type == EventType.MouseDown && evt.button == 0)
+            {
                 try { evt.Use(); } catch { }
-                return false; // swallow original to prevent early placement/sound
             }
             return true;
+        }
+
+        public static bool HandleProcessInputPrefix(Designator des, Event evt)
+        {
+            // If we pinned on left-click, swallow original
+            return !TryPinOnLeftClick(des, evt);
         }
 
         private static SoundDef ResolveSound(string defName)
         {
             if (string.IsNullOrEmpty(defName)) return null;
-            try { return DefDatabase<SoundDef>.GetNamedSilentFail(defName); } catch { return null; }
+            try
+            {
+                if (SoundCache.TryGetValue(defName, out var sd)) return sd;
+                var resolved = DefDatabase<SoundDef>.GetNamedSilentFail(defName);
+                SoundCache[defName] = resolved; // cache even if null
+                return resolved;
+            }
+            catch { return null; }
         }
 
         public static void AllowNextSuccessSound()
@@ -698,13 +829,10 @@ namespace PerfectPlacement
             if (des == null) return null;
             var t = des.GetType();
             Func<Designator, SoundDef> getter;
-            lock (SuccessSoundGetterCacheLock)
+            if (!SuccessSoundGetterCache.TryGetValue(t, out getter))
             {
-                if (!SuccessSoundGetterCache.TryGetValue(t, out getter))
-                {
-                    getter = BuildSuccessSoundGetter(t);
-                    SuccessSoundGetterCache[t] = getter; // may be null
-                }
+                getter = BuildSuccessSoundGetter(t);
+                SuccessSoundGetterCache[t] = getter; // may be null
             }
             try { return getter != null ? getter(des) : null; } catch { return null; }
         }
@@ -714,11 +842,7 @@ namespace PerfectPlacement
             try
             {
                 SoundDef sd = TryGetDesignatorSuccessSound(des);
-                if (sd == null)
-                {
-                    // Fallback to vanilla placement sound DefName
-                    sd = ResolveSound("Designate_Place");
-                }
+                if (sd == null) sd = ResolveSound("Designate_Place");
                 if (sd != null)
                 {
                     // Mark the next sound as allowed so our global suppression won't swallow it
@@ -737,22 +861,25 @@ namespace PerfectPlacement
                 if (sd == null) return false;
                 if (_allowSuccessSoundOnce)
                 {
-                    // Consume the allowance and permit this one
                     _allowSuccessSoundOnce = false;
                     return false;
                 }
+                // Quick global check: if nothing pinned, don't suppress
+                if (!HasAnyPinned) return false;
+
+                // Quick name filters
+                if (sd.defName == "Designate_Place" || sd.defName == "Click")
+                    return true;
+
                 var s = PerfectPlacement.Settings;
                 if (s == null) return false;
                 var des = CurrentSelectedDesignator();
                 if (des == null) return false;
                 if (!MouseRotateEnabledFor(des, s)) return false;
                 if (!TryGetPinned(des, out var _)) return false;
-                // Suppress if vanilla tries to play the designator's success sound or the generic place sound
+
                 var succ = TryGetDesignatorSuccessSound(des);
                 if (succ != null && ReferenceEquals(sd, succ)) return true;
-                if (sd.defName == "Designate_Place") return true;
-                // Also suppress generic UI click that may fire on MouseDown when pinning
-                if (sd.defName == "Click") return true;
             }
             catch { }
             return false;
@@ -788,26 +915,7 @@ namespace PerfectPlacement
 
         public static void ConsumeLeftClickIfMouseRotate(Designator des)
         {
-            var s = PerfectPlacement.Settings;
-            if (s == null) return;
-            if (!MouseRotateEnabledFor(des, s)) return;
-            var evt = Event.current;
-            bool mouseDownNow = (evt != null && evt.type == EventType.MouseDown && evt.button == 0) || Input.GetMouseButtonDown(0);
-            if (mouseDownNow)
-            {
-                if (!TryGetPinned(des, out var _))
-                {
-                    var pin = GetActualMouseCell();
-                    SetPinned(des, pin);
-                    PlayPinSound(des);
-                    // Suppress any immediate mouse-attachment warnings on the pin frame
-                    SuppressNextMouseAttachment();
-                }
-                if (evt != null && evt.type == EventType.MouseDown && evt.button == 0)
-                {
-                    try { evt.Use(); } catch { }
-                }
-            }
+            TryPinOnLeftClick(des, Event.current);
         }
     }
 }
