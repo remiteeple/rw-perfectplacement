@@ -2,7 +2,7 @@
 
 ### Perfect Placement 
 
-This mod enhances object placement by allowing you to rotate objects with the mouse before placing them. It also provides options to either keep the original rotation when reinstalling or to force a specific rotation for any build, install, or reinstall action.  Think like how objects are placed in The Sims!
+This mod enhances object placement by allowing you to rotate objects with the mouse before placing them. It also provides options to either keep the original rotation when reinstalling or to force a specific rotation for any build, install, or reinstall action.
 
 ---
 
