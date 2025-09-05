@@ -526,7 +526,7 @@ namespace PerfectPlacement
                 catch { }
 
                 // Mouse rotation if outside deadzone and no active keyboard override
-                if (!inDeadzone && (!KeyboardOverrideUntilMove.Contains(des) || mouseMoved))
+                if (mouseMoved && !inDeadzone && !KeyboardOverrideUntilMove.Contains(des))
                 {
                     if (dx != 0 || dz != 0)
                     {
