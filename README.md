@@ -34,10 +34,17 @@ All features can be configured in the mod settings menu under "Placement Plus". 
 
 Output DLLs are placed under `<MAJOR.MINOR>/Assemblies/PerfectPlacement.dll` (e.g., `1.6/Assemblies/PerfectPlacement.dll`).
 
+### Build (Visual Studio)
+- Open `PerfectPlacement.sln` in Visual Studio 2022 or newer.
+- Select a configuration that includes the game version:
+  - `Debug-1.4`, `Debug-1.5`, `Debug-1.6`
+  - `Release-1.4`, `Release-1.5`, `Release-1.6`
+- Build the project. Output is written to `<MAJOR.MINOR>/Assemblies/PerfectPlacement.dll` (e.g., `1.5/Assemblies/PerfectPlacement.dll`).
+- These configurations set `GameVersion` internally to match the CLI output location, so VS builds and `dotnet build -p:GameVersion=...` produce identical folder layouts.
+
 ### Install
 - Copy this mod folder into `RimWorld/Mods/`.
 - Enable **Placement Plus** in the in-game mod list and restart.
 
 ### Supported Versions
 - 1.4, 1.5, 1.6 (CI builds for each)
-

@@ -9,9 +9,21 @@
     <Nullable>disable</Nullable>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
     <DefineConstants>RIMWORLD_$(GameVersion.Replace(".", "_"))</DefineConstants>
-    <OutputPath>..\$(GameVersion)\Assemblies</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <!-- Make VS aware of custom configurations -->
+    <Configurations>Debug;Release;Debug-1.4;Debug-1.5;Debug-1.6;Release-1.4;Release-1.5;Release-1.6</Configurations>
+  </PropertyGroup>
+
+  <!-- Map custom VS configurations to GameVersion -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug-1.4' or '$(Configuration)' == 'Release-1.4'">
+    <GameVersion>1.4</GameVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug-1.5' or '$(Configuration)' == 'Release-1.5'">
+    <GameVersion>1.5</GameVersion>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug-1.6' or '$(Configuration)' == 'Release-1.6'">
+    <GameVersion>1.6</GameVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -38,5 +50,25 @@
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
+  </PropertyGroup>
+
+  <!-- Treat Release-<version> like Release -->
+  <PropertyGroup Condition="'$(Configuration)' == 'Release-1.4' or '$(Configuration)' == 'Release-1.5' or '$(Configuration)' == 'Release-1.6'">
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
+    <Optimize>true</Optimize>
+  </PropertyGroup>
+
+  <!-- If still unset, derive GameVersion from configuration name (e.g., Release-1.6) -->
+  <PropertyGroup Condition="'$(GameVersion)' == ''">
+    <_CfgVersion>$([System.Text.RegularExpressions.Regex]::Match('$(Configuration)', '\\d+\\.\\d+').Value)</_CfgVersion>
+    <GameVersion Condition="'$(GameVersion)' == '' and '$(_CfgVersion)' != ''">$(_CfgVersion)</GameVersion>
+  </PropertyGroup>
+
+  <!-- Set OutputPath after GameVersion is known; fallback to ../Assemblies when unknown -->
+  <PropertyGroup>
+    <_ComputedOutput>..\$(GameVersion)\Assemblies\</_ComputedOutput>
+    <_ComputedOutput Condition="'$(GameVersion)' == ''">..\Assemblies\</_ComputedOutput>
+    <OutputPath Condition="'$(OutputPath)' == ''">$(_ComputedOutput)</OutputPath>
   </PropertyGroup>
 </Project>
