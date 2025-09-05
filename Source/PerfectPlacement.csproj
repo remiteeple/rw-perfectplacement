@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net472</TargetFramework>
     <OutputType>Library</OutputType>
@@ -8,44 +8,35 @@
     <Deterministic>true</Deterministic>
     <Nullable>disable</Nullable>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
-    <DefineConstants>RIMWORLD_1_6</DefineConstants>
-    <RimWorldDir>$(RIMWORLD_DIR)</RimWorldDir>
-    <RimWorldManaged>$(RimWorldDir)\RimWorldWin64_Data\Managed</RimWorldManaged>
-    <OutputPath>..\1.6\Assemblies</OutputPath>
+    <DefineConstants>RIMWORLD_$(GameVersion.Replace(".", "_"))</DefineConstants>
+    <OutputPath>..\$(GameVersion)\Assemblies</OutputPath>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Krafs.Rimworld.Ref" Version="1.6.4566" />
+    <!-- Resolve RimWorld refs: latest by default, or pin via -p:GameVersion=MAJOR.MINOR -->
+    <PackageReference Include="Krafs.Rimworld.Ref" Version="$(KrafsRimworldRefVersion)" GeneratePathProperty="true" />
     <PackageReference Include="Lib.Harmony" Version="2.4.1">
       <ExcludeAssets>runtime</ExcludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
   </ItemGroup>
 
-  <ItemGroup>
-    <Reference Include="Assembly-CSharp">
-      <HintPath>$(RimWorldManaged)\Assembly-CSharp.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="UnityEngine.CoreModule">
-      <HintPath>$(RimWorldManaged)\UnityEngine.CoreModule.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="UnityEngine">
-      <HintPath>$(RimWorldManaged)\UnityEngine.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-    <Reference Include="UnityEngine.IMGUIModule">
-      <HintPath>$(RimWorldManaged)\UnityEngine.IMGUIModule.dll</HintPath>
-      <Private>false</Private>
-    </Reference>
-  </ItemGroup>
+  <!-- Choose version to restore: latest by default, or $(GameVersion).* when provided -->
+  <PropertyGroup>
+    <KrafsRimworldRefVersion Condition="'$(GameVersion)' != ''">$(GameVersion).*</KrafsRimworldRefVersion>
+    <KrafsRimworldRefVersion Condition="'$(KrafsRimworldRefVersion)' == ''">*</KrafsRimworldRefVersion>
+  </PropertyGroup>
+
+  <!-- If GameVersion not provided, derive MAJOR.MINOR from restored package path -->
+  <PropertyGroup Condition="'$(GameVersion)' == '' and '$(PkgKrafs_Rimworld_Ref)' != ''">
+    <_ResolvedRimRefVersion>$([System.IO.Path]::GetFileName($(PkgKrafs_Rimworld_Ref)))</_ResolvedRimRefVersion>
+    <GameVersion>$([System.Text.RegularExpressions.Regex]::Match($(_ResolvedRimRefVersion), '^\d+\.\d+').Value)</GameVersion>
+  </PropertyGroup>
 
   <PropertyGroup Condition="'$(Configuration)' == 'Release'">
     <DebugType>none</DebugType>
     <DebugSymbols>false</DebugSymbols>
   </PropertyGroup>
 </Project>
-
