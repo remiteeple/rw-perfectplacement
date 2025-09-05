@@ -11,6 +11,7 @@
      before placing them. It also provides options to either keep the original rotation when 
      reinstalling or to force a specific rotation for any build, install, or reinstall action.
   </description>
+  <preview>About/Preview.png</preview>
   <modDependencies>
     <li>
       <packageId>brrainz.harmony</packageId>
