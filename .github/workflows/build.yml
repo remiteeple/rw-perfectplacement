@@ -1,0 +1,85 @@
+name: Build PerfectPlacement
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    strategy:
+      matrix:
+        rimworld_version: [ '1.4', '1.5', '1.6' ]
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.x'
+
+    - name: Restore packages
+      run: dotnet restore Source/PerfectPlacement.csproj -p:GameVersion=${{ matrix.rimworld_version }}
+
+    - name: Build for RimWorld ${{ matrix.rimworld_version }}
+      run: dotnet build Source/PerfectPlacement.csproj -c Release -p:GameVersion=${{ matrix.rimworld_version }} --no-restore
+      
+    - name: Upload Artifact for ${{ matrix.rimworld_version }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: PerfectPlacement-${{ matrix.rimworld_version }}
+        path: ${{ matrix.rimworld_version }}/Assemblies/PerfectPlacement.dll
+
+  release:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: PerfectPlacement-*
+          merge-multiple: true
+
+      - name: Compute next tag
+        id: compute_tag
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          latest=$(git tag -l 'v*' | sort -V | tail -n 1)
+          if [ -z "$latest" ]; then
+            new="v1.0.0"
+          else
+            base=${latest#v}
+            IFS='.' read -r major minor patch <<< "$base"
+            patch=${patch:-0}
+            patch=$((patch+1))
+            new="v${major}.${minor}.${patch}"
+          fi
+          echo "tag=$new" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.compute_tag.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: PerfectPlacement ${{ steps.compute_tag.outputs.tag }}
+          draft: false
+          prerelease: false
+          files: |
+            1.4/Assemblies/PerfectPlacement.dll
+            1.5/Assemblies/PerfectPlacement.dll
+            1.6/Assemblies/PerfectPlacement.dll

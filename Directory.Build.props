@@ -1,0 +1,5 @@
+<Project>
+  <!-- Default GameVersion not set here.
+       It is derived from the resolved Krafs.Rimworld.Ref package inside the project file.
+       Override with -p:GameVersion=MAJOR.MINOR if you want to pin. -->
+</Project>
