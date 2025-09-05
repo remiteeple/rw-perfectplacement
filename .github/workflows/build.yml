@@ -30,12 +30,35 @@ jobs:
 
     - name: Build for RimWorld ${{ matrix.rimworld_version }}
       run: dotnet build Source/PerfectPlacement.csproj -c Release -p:GameVersion=${{ matrix.rimworld_version }} --no-restore
-      
-    - name: Upload Artifact for ${{ matrix.rimworld_version }}
+
+    - name: Package mod for ${{ matrix.rimworld_version }}
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $version = '${{ matrix.rimworld_version }}'
+        $pkgRoot = Join-Path $PWD "package"
+        New-Item -ItemType Directory -Force -Path $pkgRoot | Out-Null
+        $staging = Join-Path $pkgRoot "PerfectPlacement-$version"
+        if (Test-Path $staging) { Remove-Item -Recurse -Force $staging }
+        New-Item -ItemType Directory -Force -Path $staging | Out-Null
+        # Copy common mod content
+        Copy-Item -Recurse -Force About (Join-Path $staging 'About')
+        if (Test-Path 'Defs') { Copy-Item -Recurse -Force Defs (Join-Path $staging 'Defs') }
+        # Copy version-specific assemblies
+        Copy-Item -Recurse -Force $version (Join-Path $staging $version)
+        # Optional: include license/readme
+        if (Test-Path 'LICENSE') { Copy-Item -Force LICENSE (Join-Path $staging 'LICENSE') }
+        if (Test-Path 'README.md') { Copy-Item -Force README.md (Join-Path $staging 'README.md') }
+        # Create zip
+        $zipPath = Join-Path $pkgRoot ("PerfectPlacement-$version.zip")
+        if (Test-Path $zipPath) { Remove-Item -Force $zipPath }
+        Compress-Archive -Path (Join-Path $staging '*') -DestinationPath $zipPath
+
+    - name: Upload artifact for ${{ matrix.rimworld_version }}
       uses: actions/upload-artifact@v4
       with:
         name: PerfectPlacement-${{ matrix.rimworld_version }}
-        path: ${{ matrix.rimworld_version }}/Assemblies/PerfectPlacement.dll
+        path: package/PerfectPlacement-${{ matrix.rimworld_version }}.zip
 
   release:
     if: github.ref == 'refs/heads/main'
@@ -80,6 +103,4 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            1.4/Assemblies/PerfectPlacement.dll
-            1.5/Assemblies/PerfectPlacement.dll
-            1.6/Assemblies/PerfectPlacement.dll
+            PerfectPlacement-*.zip
