@@ -4,12 +4,16 @@
   <packageId>remi.perfectplacement</packageId>
   <author></author>
   <supportedVersions>
+    <li>1.4</li>
+    <li>1.5</li>
     <li>1.6</li>
   </supportedVersions>
   <description>
-     This mod enhances object placement by allowing you to rotate objects with the mouse 
-     before placing them. It also provides options to either keep the original rotation when 
-     reinstalling or to force a specific rotation for any build, install, or reinstall action.
+    Perfect Placement improves build placement by letting you rotate with the mouse before placing. Hold left mouse to pin an object, then move the mouse to rotate.  Similar to building in The Sims!
+
+    You can keep an object’s original rotation when reinstalling, or force a specific rotation (North, East, South, West) for build, install, and reinstall actions.
+
+    All features are configurable in mod settings under "Placement Plus": toggle mouse rotation, choose reinstall behavior, and enable/set rotation overrides.
   </description>
   <preview>About/Preview.png</preview>
   <modDependencies>
