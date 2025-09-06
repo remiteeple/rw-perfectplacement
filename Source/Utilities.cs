@@ -37,7 +37,7 @@ namespace PerfectPlacement
             public bool? IsReinstall;
             public bool? IsRotatable;
         }
-        private static readonly ConditionalWeakTable<Designator, CacheData> InstanceCache = new ConditionalWeakTable<Designator, CacheData>();
+        private static ConditionalWeakTable<Designator, CacheData> InstanceCache = new ConditionalWeakTable<Designator, CacheData>();
 
         [ThreadStatic]
         private static bool _suppressMouseCellPin;
@@ -309,7 +309,9 @@ namespace PerfectPlacement
         public static void ClearRotatableCache()
         {
             RotatableDesignatorCache.Clear();
-            InstanceCache.Clear();
+            // ConditionalWeakTable.Clear is not available on older frameworks (e.g., 1.4 toolchain).
+            // Reinitialize the table to effectively clear cached entries across all target versions.
+            InstanceCache = new ConditionalWeakTable<Designator, CacheData>();
         }
 
         public static void ClearTransientAll()
