@@ -2,7 +2,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 
 [assembly: AssemblyTitle("PerfectPlacement")]
-[assembly: AssemblyDescription("PerfectPlacement: preserve original rotation on reinstall")]
+[assembly: AssemblyDescription("PerfectPlacement: Placement Made Better")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
 [assembly: AssemblyProduct("PerfectPlacement")]

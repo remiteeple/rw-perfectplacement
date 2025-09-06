@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LanguageData>
   <!-- Mod settings category name -->
-  <PP.SettingsCategory>Placement Plus</PP.SettingsCategory>
+  <PP.SettingsCategory>Perfect Placement</PP.SettingsCategory>
 
   <!-- Global settings -->
   <PP.EnableMouseRotation>Enable Mouse Rotation</PP.EnableMouseRotation>
@@ -19,7 +19,7 @@
 
   <!-- Install section -->
   <PP.Section.Install>When Installing a minified object:</PP.Section.Install>
-  <PP.Label.InstallDirection>Install direction:</PP.Label.InstallDirection>
+  <PP.Label.InstallDirection>Install Direction</PP.Label.InstallDirection>
 
   <!-- Build section -->
   <PP.Section.Build>When Building from the Architect menu:</PP.Section.Build>
