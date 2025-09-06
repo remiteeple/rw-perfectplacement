@@ -1035,10 +1035,9 @@ namespace PerfectPlacement
                     DebugLog(() => $"Suppressing message '{text}' (matches {key3})");
                     return true;
                 }
-                // Fallback: plain English prefix match in case translation lookup differs
-                if (text.IndexOf("Interaction spot is blocked", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                if (MatchesSuppressedKey(text, "IdenticalThingExists", out var key4))
                 {
-                    DebugLog(() => $"Suppressing message '{text}' (fallback English match)");
+                    DebugLog(() => $"Suppressing message '{text}' (matches {key4})");
                     return true;
                 }
                 return false;
