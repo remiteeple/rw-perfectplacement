@@ -15,7 +15,6 @@
 
     All features are configurable in mod settings under "Placement Plus": toggle mouse rotation, choose reinstall behavior, and enable/set rotation overrides.
   </description>
-  <modIconPath>About/ModIcon.png</modIconPath>
   <modDependencies>
     <li>
       <packageId>brrainz.harmony</packageId>

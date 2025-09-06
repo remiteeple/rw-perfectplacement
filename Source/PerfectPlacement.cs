@@ -34,13 +34,13 @@ namespace PerfectPlacement
             bool keep = Settings.PerfectPlacement;
             bool reinstallOverride = Settings.useOverrideRotation;
 
-            if (list.RadioButton("Keep original rotation", keep, tooltip: "When reinstalling, the object will keep its current rotation."))
+            if (list.RadioButton("Keep Original Rotation", keep, tooltip: "When reinstalling, the object will keep its current rotation."))
             {
                 Settings.PerfectPlacement = true;
                 Settings.useOverrideRotation = false;
             }
 
-            if (list.RadioButton("Use override rotation", reinstallOverride, tooltip: "When reinstalling, always force the object to a specific rotation."))
+            if (list.RadioButton("Reinstall Direction", reinstallOverride, tooltip: "When reinstalling, always force the object to a specific rotation."))
             {
                 Settings.PerfectPlacement = false;
                 Settings.useOverrideRotation = true;
@@ -62,7 +62,7 @@ namespace PerfectPlacement
             // Always show direction selection. Selecting South means no override.
             Rect row = list.GetRect(Text.LineHeight);
             row.xMin += 0f; // no extra indent beyond section
-            Widgets.Label(row.LeftHalf(), "Install direction (South = No override):");
+            Widgets.Label(row.LeftHalf(), "Install direction:");
             Rect buttonRect = row.RightHalf();
             string label = Settings.installOverrideRotation.ToStringHuman();
             if (Widgets.ButtonText(buttonRect, label))
@@ -88,7 +88,7 @@ namespace PerfectPlacement
             // Always show direction selection. Selecting South means no override.
             Rect buildRow = list.GetRect(Text.LineHeight);
             buildRow.xMin += 0f;
-            Widgets.Label(buildRow.LeftHalf(), "Build direction (South = No override):");
+            Widgets.Label(buildRow.LeftHalf(), "Build Direction");
             Rect buildButtonRect = buildRow.RightHalf();
             string buildLabel = Settings.buildOverrideRotation.ToStringHuman();
             if (Widgets.ButtonText(buildButtonRect, buildLabel))
@@ -120,7 +120,7 @@ namespace PerfectPlacement
         {
             Rect row = list.GetRect(Text.LineHeight);
             row.xMin += 24f; // Indent
-            Widgets.Label(row.LeftHalf(), "Override direction:");
+            Widgets.Label(row.LeftHalf(), "Override Direction");
             Rect buttonRect = row.RightHalf();
             string label = currentRotation.ToStringHuman();
             if (Widgets.ButtonText(buttonRect, label))
