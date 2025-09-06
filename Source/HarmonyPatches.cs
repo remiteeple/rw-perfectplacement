@@ -209,8 +209,7 @@ namespace PerfectPlacement
 
                 if (isReinstall && settings.PerfectPlacement && !Utilities.WasApplied(__instance))
                 {
-                    bool rotatable = (source?.def as ThingDef)?.rotatable ?? false;
-                    if (rotatable)
+                    if (Utilities.IsRotatable(__instance))
                     {
                         var desiredKeep = source.Rotation;
                         if (Utilities.SetAllPlacingRotFields(__instance, desiredKeep)) Utilities.MarkApplied(__instance);

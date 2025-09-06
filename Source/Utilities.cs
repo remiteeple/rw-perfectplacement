@@ -32,6 +32,13 @@ namespace PerfectPlacement
         private static readonly Dictionary<Type, Func<Designator>> SelectedGetterByMgrType = new Dictionary<Type, Func<Designator>>();
         private static readonly Dictionary<Type, Func<Thing, Thing>> InnerThingGetterCache = new Dictionary<Type, Func<Thing, Thing>>();
 
+        private class CacheData
+        {
+            public bool? IsReinstall;
+            public bool? IsRotatable;
+        }
+        private static readonly ConditionalWeakTable<Designator, CacheData> InstanceCache = new ConditionalWeakTable<Designator, CacheData>();
+
         [ThreadStatic]
         private static bool _suppressMouseCellPin;
         [ThreadStatic]
@@ -118,12 +125,17 @@ namespace PerfectPlacement
 
         public static bool IsRotatable(Designator d)
         {
+            if (d == null) return false;
+
+            if (InstanceCache.TryGetValue(d, out var cache) && cache.IsRotatable.HasValue)
+            {
+                return cache.IsRotatable.Value;
+            }
+
             try
             {
-                if (d == null) return false;
                 if (RotatableDesignatorCache.TryGetValue(d, out var cached)) return cached;
                 bool result = false;
-                // Install/Reinstall designator: inspect the actual thing being installed
                 if (d is Designator_Install)
                 {
                     var src = FindSourceThingForInstall(d);
@@ -131,22 +143,31 @@ namespace PerfectPlacement
                     {
                         var inner = TryGetInnerThing(src) ?? src;
                         var tdef = inner?.def as ThingDef;
-                        if (tdef != null) { result = tdef.rotatable; RotatableDesignatorCache[d] = result; return result; }
+                        if (tdef != null) { result = tdef.rotatable; }
                     }
-                    // Fallback to placing def if any
-                    var pd = FindPlacingDef(d) as ThingDef;
-                    result = pd != null && pd.rotatable;
-                    RotatableDesignatorCache[d] = result;
-                    return result;
+                    else
+                    {
+                        var pd = FindPlacingDef(d) as ThingDef;
+                        result = pd != null && pd.rotatable;
+                    }
                 }
-                // Build/Place designators: check the placing BuildableDef
-                if (d is Designator_Build || d is Designator_Place)
+                else if (d is Designator_Build || d is Designator_Place)
                 {
                     var pd = FindPlacingDef(d) as ThingDef;
                     result = pd != null && pd.rotatable;
-                    RotatableDesignatorCache[d] = result;
-                    return result;
                 }
+
+                if (InstanceCache.TryGetValue(d, out cache))
+                {
+                    cache.IsRotatable = result;
+                }
+                else
+                {
+                    InstanceCache.Add(d, new CacheData { IsRotatable = result });
+                }
+
+                RotatableDesignatorCache[d] = result;
+                return result;
             }
             catch { }
             return false;
@@ -288,6 +309,7 @@ namespace PerfectPlacement
         public static void ClearRotatableCache()
         {
             RotatableDesignatorCache.Clear();
+            InstanceCache.Clear();
         }
 
         public static void ClearTransientAll()
@@ -567,13 +589,29 @@ namespace PerfectPlacement
         public static bool IsReinstallDesignator(Designator d, out Thing source)
         {
             source = FindSourceThingForInstall(d);
+            if (d == null) return false;
+
+            if (InstanceCache.TryGetValue(d, out var cache) && cache.IsReinstall.HasValue)
+            {
+                return cache.IsReinstall.Value;
+            }
+
             if (source == null) return false;
+
             try
             {
-                // Reinstall when not dealing with a MinifiedThing OR when the source is currently spawned on map
                 var inner = TryGetInnerThing(source);
-                if (inner == null) return true;
-                return source.Spawned;
+                bool isReinstall = inner == null || source.Spawned;
+                
+                if (InstanceCache.TryGetValue(d, out cache))
+                {
+                    cache.IsReinstall = isReinstall;
+                }
+                else
+                {
+                    InstanceCache.Add(d, new CacheData { IsReinstall = isReinstall });
+                }
+                return isReinstall;
             }
             catch { return false; }
         }
