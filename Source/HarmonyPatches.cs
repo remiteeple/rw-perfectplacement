@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using System.Collections.Generic;
+using System.Linq;
 using HarmonyLib;
 using RimWorld;
 using Verse;
@@ -67,10 +68,11 @@ namespace PerfectPlacement
         {
             try
             {
-                if (__instance is Designator_Install) return;
+                // Only enforce architect build override here; avoid leaking into install/reinstall or other place flows.
+                if (!(__instance is Designator_Build)) return;
                 var s = PerfectPlacement.Settings;
                 if (s == null) return;
-                if (s.buildUseOverrideRotation && Utilities.IsRotatable(__instance))
+                if (s.buildOverrideRotation != Rot4.South && Utilities.IsRotatable(__instance))
                 {
                     var desired = s.buildOverrideRotation;
                     __result = desired;
@@ -82,52 +84,47 @@ namespace PerfectPlacement
     }
 
     [HarmonyPatch]
-    public static class Patch_Designator_Install_DesignateSingleCell_MouseRotate
+    public static class Patch_Designator_DesignateSingleCell_MouseRotate_All
     {
-        private static MethodBase _cachedTarget;
-        private static bool _isCached;
-
-        static MethodBase TargetMethod()
+        static IEnumerable<MethodBase> TargetMethods()
         {
-            if (_isCached) return _cachedTarget;
-
-            _isCached = true;
-            var t = typeof(Designator_Install);
-            var m = AccessTools.Method(t, "DesignateSingleCell", new[] { typeof(IntVec3) });
-            if (m != null)
+            var targets = new[] { typeof(Designator_Install), typeof(Designator_Place), typeof(Designator_Build) };
+            foreach (var t in targets)
             {
-                _cachedTarget = m;
-                return _cachedTarget;
+                var m = FindDesignateSingleCell(t);
+                if (m != null) yield return m;
             }
+        }
+
+        private static MethodInfo FindDesignateSingleCell(Type t)
+        {
+            var intVec3 = typeof(IntVec3);
+            var direct = AccessTools.Method(t, "DesignateSingleCell", new[] { intVec3 });
+            if (direct != null) return direct;
 
             foreach (var mi in AccessTools.GetDeclaredMethods(t))
             {
                 if (!mi.Name.Contains("Designate")) continue;
                 var pars = mi.GetParameters();
-                if (pars.Length == 1 && pars[0].ParameterType == typeof(IntVec3) && mi.ReturnType == typeof(void))
+                if (pars.Length == 1 && pars[0].ParameterType == intVec3 && mi.ReturnType == typeof(void))
                 {
-                    _cachedTarget = mi;
-                    return _cachedTarget;
+                    return mi;
                 }
             }
 
             var bt = t.BaseType;
             while (bt != null)
             {
-                m = AccessTools.Method(bt, "DesignateSingleCell", new[] { typeof(IntVec3) });
-                if (m != null)
-                {
-                    _cachedTarget = m;
-                    return _cachedTarget;
-                }
+                var m = AccessTools.Method(bt, "DesignateSingleCell", new[] { intVec3 });
+                if (m != null) return m;
+
                 foreach (var mi in AccessTools.GetDeclaredMethods(bt))
                 {
                     if (!mi.Name.Contains("Designate")) continue;
                     var pars = mi.GetParameters();
-                    if (pars.Length == 1 && pars[0].ParameterType == typeof(IntVec3) && mi.ReturnType == typeof(void))
+                    if (pars.Length == 1 && pars[0].ParameterType == intVec3 && mi.ReturnType == typeof(void))
                     {
-                        _cachedTarget = mi;
-                        return _cachedTarget;
+                        return mi;
                     }
                 }
                 bt = bt.BaseType;
@@ -135,7 +132,7 @@ namespace PerfectPlacement
             return null;
         }
 
-        static bool Prepare() => TargetMethod() != null;
+        static bool Prepare() => TargetMethods().Any();
 
         public static bool Prefix(Designator __instance)
         {
@@ -202,7 +199,7 @@ namespace PerfectPlacement
 
                 bool anyActive = isReinstall
                     ? (settings.useOverrideRotation || settings.PerfectPlacement)
-                    : settings.installUseOverrideRotation;
+                    : (settings.installOverrideRotation != Rot4.South);
                 if (!anyActive) return;
 
                 if (Utilities.ApplyInstallOrReinstallOverrideIfNeeded(__instance, settings, isReinstall)) return;
@@ -229,65 +226,7 @@ namespace PerfectPlacement
         }
     }
 
-    [HarmonyPatch]
-    public static class Patch_Designator_Place_DesignateSingleCell_MouseRotate
-    {
-        private static MethodBase _cachedTarget;
-        private static bool _isCached;
-
-        static MethodBase TargetMethod()
-        {
-            if (_isCached) return _cachedTarget;
-
-            _isCached = true;
-            var t = typeof(Designator_Place);
-            var m = AccessTools.Method(t, "DesignateSingleCell", new[] { typeof(IntVec3) });
-            if (m != null)
-            {
-                _cachedTarget = m;
-                return _cachedTarget;
-            }
-            foreach (var mi in AccessTools.GetDeclaredMethods(t))
-            {
-                if (!mi.Name.Contains("Designate")) continue;
-                var pars = mi.GetParameters();
-                if (pars.Length == 1 && pars[0].ParameterType == typeof(IntVec3) && mi.ReturnType == typeof(void))
-                {
-                    _cachedTarget = mi;
-                    return _cachedTarget;
-                }
-            }
-            var bt = t.BaseType;
-            while (bt != null)
-            {
-                m = AccessTools.Method(bt, "DesignateSingleCell", new[] { typeof(IntVec3) });
-                if (m != null)
-                {
-                    _cachedTarget = m;
-                    return _cachedTarget;
-                }
-                foreach (var mi in AccessTools.GetDeclaredMethods(bt))
-                {
-                    if (!mi.Name.Contains("Designate")) continue;
-                    var pars = mi.GetParameters();
-                    if (pars.Length == 1 && pars[0].ParameterType == typeof(IntVec3) && mi.ReturnType == typeof(void))
-                    {
-                        _cachedTarget = mi;
-                        return _cachedTarget;
-                    }
-                }
-                bt = bt.BaseType;
-            }
-            return null;
-        }
-
-        static bool Prepare() => TargetMethod() != null;
-
-        public static bool Prefix(Designator __instance)
-        {
-            return Utilities.HandleDesignatePrefix(__instance);
-        }
-    }
+    
 
     [HarmonyPatch(typeof(Designator_Place), nameof(Designator_Place.SelectedUpdate))]
     public static class Patch_Designator_Place_SelectedUpdate
@@ -305,10 +244,14 @@ namespace PerfectPlacement
                 var settings = PerfectPlacement.Settings;
                 if (settings == null) return;
 
-                bool anyActive = settings.buildUseOverrideRotation || Utilities.MouseRotateEnabledFor(__instance, settings);
+                bool buildActive = (__instance is Designator_Build) && (settings.buildOverrideRotation != Rot4.South);
+                bool anyActive = buildActive || Utilities.MouseRotateEnabledFor(__instance, settings);
                 if (!anyActive) return;
 
-                Utilities.ApplyBuildOverrideIfNeeded(__instance, settings);
+                if (__instance is Designator_Build)
+                {
+                    Utilities.ApplyBuildOverrideIfNeeded(__instance, settings);
+                }
                 if (Utilities.HandleMouseRotate(__instance)) return;
             }
             catch (Exception e)
@@ -318,65 +261,7 @@ namespace PerfectPlacement
         }
     }
 
-    [HarmonyPatch]
-    public static class Patch_Designator_Build_DesignateSingleCell_MouseRotate
-    {
-        private static MethodBase _cachedTarget;
-        private static bool _isCached;
-
-        static MethodBase TargetMethod()
-        {
-            if (_isCached) return _cachedTarget;
-
-            _isCached = true;
-            var t = typeof(Designator_Build);
-            var m = AccessTools.Method(t, "DesignateSingleCell", new[] { typeof(IntVec3) });
-            if (m != null)
-            {
-                _cachedTarget = m;
-                return _cachedTarget;
-            }
-            foreach (var mi in AccessTools.GetDeclaredMethods(t))
-            {
-                if (!mi.Name.Contains("Designate")) continue;
-                var pars = mi.GetParameters();
-                if (pars.Length == 1 && pars[0].ParameterType == typeof(IntVec3) && mi.ReturnType == typeof(void))
-                {
-                    _cachedTarget = mi;
-                    return _cachedTarget;
-                }
-            }
-            var bt = t.BaseType;
-            while (bt != null)
-            {
-                m = AccessTools.Method(bt, "DesignateSingleCell", new[] { typeof(IntVec3) });
-                if (m != null)
-                {
-                    _cachedTarget = m;
-                    return _cachedTarget;
-                }
-                foreach (var mi in AccessTools.GetDeclaredMethods(bt))
-                {
-                    if (!mi.Name.Contains("Designate")) continue;
-                    var pars = mi.GetParameters();
-                    if (pars.Length == 1 && pars[0].ParameterType == typeof(IntVec3) && mi.ReturnType == typeof(void))
-                    {
-                        _cachedTarget = mi;
-                        return _cachedTarget;
-                    }
-                }
-                bt = bt.BaseType;
-            }
-            return null;
-        }
-
-        static bool Prepare() => TargetMethod() != null;
-
-        public static bool Prefix(Designator __instance)
-        {
-            return Utilities.HandleDesignatePrefix(__instance);
-        }
-    }
+    
 
     [HarmonyPatch(typeof(Designator_Build), nameof(Designator_Build.SelectedUpdate))]
     public static class Patch_Designator_Build_SelectedUpdate
@@ -394,7 +279,7 @@ namespace PerfectPlacement
                 var settings = PerfectPlacement.Settings;
                 if (settings == null) return;
 
-                bool anyActive = settings.buildUseOverrideRotation || Utilities.MouseRotateEnabledFor(__instance, settings);
+                bool anyActive = (settings.buildOverrideRotation != Rot4.South) || Utilities.MouseRotateEnabledFor(__instance, settings);
                 if (!anyActive) return;
 
                 Utilities.ApplyBuildOverrideIfNeeded(__instance, settings);
@@ -504,170 +389,56 @@ namespace PerfectPlacement
         }
     }
 
-    [HarmonyPatch]
-    public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_Tagged_WithHistorical
+    [HarmonyPatch(typeof(Messages))]
+    public static class Patch_Messages_Message_Suppress_All
     {
-        private static MethodBase _cachedTarget;
-        private static bool _isCached;
-
-        static MethodBase TargetMethod()
+        static IEnumerable<MethodBase> TargetMethods()
         {
-            if (_isCached) return _cachedTarget;
-            _isCached = true;
-            _cachedTarget = AccessTools.Method(typeof(Messages), "Message", new[] { typeof(TaggedString), typeof(MessageTypeDef), typeof(bool) });
-            return _cachedTarget;
+            // Dynamically target all Messages.Message overloads (public/non-public, static)
+            return typeof(Messages)
+                .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
+                .Where(mi => mi.Name == nameof(Messages.Message));
         }
-        static bool Prepare() => TargetMethod() != null;
-        public static bool Prefix(TaggedString text, MessageTypeDef def, bool historical)
-        {
-            try { if (Utilities.ShouldSuppressDesignatorReject(text, def)) return false; } catch { }
-            return true;
-        }
-    }
 
-    [HarmonyPatch]
-    public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_String_WithHistorical
-    {
-        private static MethodBase _cachedTarget;
-        private static bool _isCached;
+        static bool Prepare() => TargetMethods().Any();
 
-        static MethodBase TargetMethod()
+        public static bool Prefix(object[] __args)
         {
-            if (_isCached) return _cachedTarget;
-            _isCached = true;
-            _cachedTarget = AccessTools.Method(typeof(Messages), "Message", new[] { typeof(string), typeof(MessageTypeDef), typeof(bool) });
-            return _cachedTarget;
-        }
-        static bool Prepare() => TargetMethod() != null;
-        public static bool Prefix(string text, MessageTypeDef def, bool historical)
-        {
-            try { if (Utilities.ShouldSuppressDesignatorReject(text, def)) return false; } catch { }
-            return true;
-        }
-    }
+            try
+            {
+                if (__args == null || __args.Length == 0) return true;
 
-    [HarmonyPatch]
-    public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_Tagged
-    {
-        private static MethodBase _cachedTarget;
-        private static bool _isCached;
+                MessageTypeDef def = null;
+                TaggedString text = default;
+                bool haveText = false;
 
-        static MethodBase TargetMethod()
-        {
-            if (_isCached) return _cachedTarget;
-            _isCached = true;
-            _cachedTarget = AccessTools.Method(typeof(Messages), "Message", new[] { typeof(TaggedString), typeof(MessageTypeDef) });
-            return _cachedTarget;
-        }
-        static bool Prepare() => TargetMethod() != null;
-        public static bool Prefix(TaggedString text, MessageTypeDef def)
-        {
-            try { if (Utilities.ShouldSuppressDesignatorReject(text, def)) return false; } catch { }
-            return true;
-        }
-    }
+                foreach (var arg in __args)
+                {
+                    if (!haveText)
+                    {
+                        if (arg is string s)
+                        {
+                            text = s;
+                            haveText = true;
+                            continue;
+                        }
+                        if (arg is TaggedString ts)
+                        {
+                            text = ts;
+                            haveText = true;
+                            continue;
+                        }
+                    }
+                    if (def == null && arg is MessageTypeDef md)
+                    {
+                        def = md;
+                    }
+                }
 
-    [HarmonyPatch]
-    public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_String
-    {
-        private static MethodBase _cachedTarget;
-        private static bool _isCached;
-
-        static MethodBase TargetMethod()
-        {
-            if (_isCached) return _cachedTarget;
-            _isCached = true;
-            _cachedTarget = AccessTools.Method(typeof(Messages), "Message", new[] { typeof(string), typeof(MessageTypeDef) });
-            return _cachedTarget;
-        }
-        static bool Prepare() => TargetMethod() != null;
-        public static bool Prefix(string text, MessageTypeDef def)
-        {
-            try { if (Utilities.ShouldSuppressDesignatorReject(text, def)) return false; } catch { }
-            return true;
-        }
-    }
-
-    [HarmonyPatch]
-    public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_Tagged_WithTargets_WithHistorical
-    {
-        private static MethodBase _cachedTarget;
-        private static bool _isCached;
-
-        static MethodBase TargetMethod()
-        {
-            if (_isCached) return _cachedTarget;
-            _isCached = true;
-            _cachedTarget = AccessTools.Method(typeof(Messages), "Message", new[] { typeof(TaggedString), typeof(LookTargets), typeof(MessageTypeDef), typeof(bool) });
-            return _cachedTarget;
-        }
-        static bool Prepare() => TargetMethod() != null;
-        public static bool Prefix(TaggedString text, LookTargets lookTargets, MessageTypeDef def, bool historical)
-        {
-            try { if (Utilities.ShouldSuppressDesignatorReject(text, def)) return false; } catch { }
-            return true;
-        }
-    }
-
-    [HarmonyPatch]
-    public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_String_WithTargets_WithHistorical
-    {
-        private static MethodBase _cachedTarget;
-        private static bool _isCached;
-
-        static MethodBase TargetMethod()
-        {
-            if (_isCached) return _cachedTarget;
-            _isCached = true;
-            _cachedTarget = AccessTools.Method(typeof(Messages), "Message", new[] { typeof(string), typeof(LookTargets), typeof(MessageTypeDef), typeof(bool) });
-            return _cachedTarget;
-        }
-        static bool Prepare() => TargetMethod() != null;
-        public static bool Prefix(string text, LookTargets lookTargets, MessageTypeDef def, bool historical)
-        {
-            try { if (Utilities.ShouldSuppressDesignatorReject(text, def)) return false; } catch { }
-            return true;
-        }
-    }
-
-    [HarmonyPatch]
-    public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_Tagged_WithTargets
-    {
-        private static MethodBase _cachedTarget;
-        private static bool _isCached;
-
-        static MethodBase TargetMethod()
-        {
-            if (_isCached) return _cachedTarget;
-            _isCached = true;
-            _cachedTarget = AccessTools.Method(typeof(Messages), "Message", new[] { typeof(TaggedString), typeof(LookTargets), typeof(MessageTypeDef) });
-            return _cachedTarget;
-        }
-        static bool Prepare() => TargetMethod() != null;
-        public static bool Prefix(TaggedString text, LookTargets lookTargets, MessageTypeDef def)
-        {
-            try { if (Utilities.ShouldSuppressDesignatorReject(text, def)) return false; } catch { }
-            return true;
-        }
-    }
-
-    [HarmonyPatch]
-    public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_String_WithTargets
-    {
-        private static MethodBase _cachedTarget;
-        private static bool _isCached;
-
-        static MethodBase TargetMethod()
-        {
-            if (_isCached) return _cachedTarget;
-            _isCached = true;
-            _cachedTarget = AccessTools.Method(typeof(Messages), "Message", new[] { typeof(string), typeof(LookTargets), typeof(MessageTypeDef) });
-            return _cachedTarget;
-        }
-        static bool Prepare() => TargetMethod() != null;
-        public static bool Prefix(string text, LookTargets lookTargets, MessageTypeDef def)
-        {
-            try { if (Utilities.ShouldSuppressDesignatorReject(text, def)) return false; } catch { }
+                if (!haveText || def == null) return true;
+                if (Utilities.ShouldSuppressDesignatorReject(text, def)) return false;
+            }
+            catch { }
             return true;
         }
     }

@@ -14,11 +14,9 @@ namespace PerfectPlacement
         public Rot4 overrideRotation = Rot4.South;
 
         // Install
-        public bool installUseOverrideRotation = false;
         public Rot4 installOverrideRotation = Rot4.South;
 
         // Build
-        public bool buildUseOverrideRotation = false;
         public Rot4 buildOverrideRotation = Rot4.South;
 
         public override void ExposeData()
@@ -31,10 +29,8 @@ namespace PerfectPlacement
             Scribe_Values.Look(ref useOverrideRotation, nameof(useOverrideRotation), false);
             Scribe_Values.Look(ref overrideRotation, nameof(overrideRotation), Rot4.South);
 
-            Scribe_Values.Look(ref installUseOverrideRotation, nameof(installUseOverrideRotation), false);
             Scribe_Values.Look(ref installOverrideRotation, nameof(installOverrideRotation), Rot4.South);
 
-            Scribe_Values.Look(ref buildUseOverrideRotation, nameof(buildUseOverrideRotation), false);
             Scribe_Values.Look(ref buildOverrideRotation, nameof(buildOverrideRotation), Rot4.South);
         }
     }

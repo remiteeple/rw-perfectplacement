@@ -585,7 +585,7 @@ namespace PerfectPlacement
             return null;
         }
 
-        // True only when placing a building being reinstalled from the map (not a MinifiedThing)
+        // True only when placing a building being reinstalled from the map (exclude MinifiedThing installs)
         public static bool IsReinstallDesignator(Designator d, out Thing source)
         {
             source = FindSourceThingForInstall(d);
@@ -600,9 +600,10 @@ namespace PerfectPlacement
 
             try
             {
-                var inner = TryGetInnerThing(source);
-                bool isReinstall = inner == null || source.Spawned;
-                
+                // Reinstall when the source is an actual spawned building/object, NOT a MinifiedThing.
+                // Minified items are often spawned in stockpiles; those should be treated as Install, not Reinstall.
+                bool isReinstall = source.Spawned && !(source is MinifiedThing);
+
                 if (InstanceCache.TryGetValue(d, out cache))
                 {
                     cache.IsReinstall = isReinstall;
@@ -951,7 +952,8 @@ namespace PerfectPlacement
             }
             else
             {
-                if (!s.installUseOverrideRotation) return false;
+                // For installs, treat South as sentinel for 'no override'.
+                if (s.installOverrideRotation == Rot4.South) return false;
                 return ApplyOverrideOnce(des, s.installOverrideRotation);
             }
         }
@@ -959,7 +961,8 @@ namespace PerfectPlacement
         public static bool ApplyBuildOverrideIfNeeded(Designator des, PerfectPlacementSettings s)
         {
             if (des == null || s == null) return false;
-            if (!s.buildUseOverrideRotation) return false;
+            // South sentinel means no override for build
+            if (s.buildOverrideRotation == Rot4.South) return false;
             if (!IsRotatable(des)) return false;
             return ApplyOverrideOnce(des, s.buildOverrideRotation);
         }

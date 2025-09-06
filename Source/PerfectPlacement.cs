@@ -59,10 +59,22 @@ namespace PerfectPlacement
             Text.Font = GameFont.Small;
             list.Gap(6f);
 
-            list.CheckboxLabeled("Use override rotation", ref Settings.installUseOverrideRotation, "When installing, always force the object to a specific rotation.");
-            if (Settings.installUseOverrideRotation)
+            // Always show direction selection. Selecting South means no override.
+            Rect row = list.GetRect(Text.LineHeight);
+            row.xMin += 0f; // no extra indent beyond section
+            Widgets.Label(row.LeftHalf(), "Install direction (South = No override):");
+            Rect buttonRect = row.RightHalf();
+            string label = Settings.installOverrideRotation.ToStringHuman();
+            if (Widgets.ButtonText(buttonRect, label))
             {
-                DrawRotationWidget(list, Settings.installOverrideRotation, newRot => Settings.installOverrideRotation = newRot);
+                var opts = new List<FloatMenuOption>
+                {
+                    new FloatMenuOption("North", () => Settings.installOverrideRotation = Rot4.North),
+                    new FloatMenuOption("East",  () => Settings.installOverrideRotation = Rot4.East),
+                    new FloatMenuOption("South", () => Settings.installOverrideRotation = Rot4.South),
+                    new FloatMenuOption("West",  () => Settings.installOverrideRotation = Rot4.West)
+                };
+                Find.WindowStack.Add(new FloatMenu(opts));
             }
 
             list.GapLine();
@@ -73,10 +85,22 @@ namespace PerfectPlacement
             Text.Font = GameFont.Small;
             list.Gap(6f);
 
-            list.CheckboxLabeled("Use override rotation", ref Settings.buildUseOverrideRotation, "When building, always force the object to a specific rotation.");
-            if (Settings.buildUseOverrideRotation)
+            // Always show direction selection. Selecting South means no override.
+            Rect buildRow = list.GetRect(Text.LineHeight);
+            buildRow.xMin += 0f;
+            Widgets.Label(buildRow.LeftHalf(), "Build direction (South = No override):");
+            Rect buildButtonRect = buildRow.RightHalf();
+            string buildLabel = Settings.buildOverrideRotation.ToStringHuman();
+            if (Widgets.ButtonText(buildButtonRect, buildLabel))
             {
-                DrawRotationWidget(list, Settings.buildOverrideRotation, newRot => Settings.buildOverrideRotation = newRot);
+                var opts = new List<FloatMenuOption>
+                {
+                    new FloatMenuOption("North", () => Settings.buildOverrideRotation = Rot4.North),
+                    new FloatMenuOption("East",  () => Settings.buildOverrideRotation = Rot4.East),
+                    new FloatMenuOption("South", () => Settings.buildOverrideRotation = Rot4.South),
+                    new FloatMenuOption("West",  () => Settings.buildOverrideRotation = Rot4.West)
+                };
+                Find.WindowStack.Add(new FloatMenu(opts));
             }
 
             list.End();
