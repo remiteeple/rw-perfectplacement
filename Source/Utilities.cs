@@ -16,6 +16,8 @@ namespace PerfectPlacement
         private const int MouseDeadzoneCells = 1; // small deadzone around pinned origin
         private static readonly ConditionalWeakTable<Designator, object> AppliedOnce = new ConditionalWeakTable<Designator, object>();
         private static readonly Dictionary<Designator, IntVec3> PinnedCell = new Dictionary<Designator, IntVec3>();
+        private static readonly Dictionary<Designator, int> PinSessionId = new Dictionary<Designator, int>();
+        private static int NextPinSessionId = 1;
         private static readonly HashSet<Designator> PlacementArmed = new HashSet<Designator>();
 
         // Cache for expensive reflection lookups
@@ -23,8 +25,6 @@ namespace PerfectPlacement
         private static readonly Dictionary<Type, Func<Designator, Rot4>> GetRotCache = new Dictionary<Type, Func<Designator, Rot4>>();
         private static readonly Dictionary<Type, Func<Designator, Thing>> InstallSourceCache = new Dictionary<Type, Func<Designator, Thing>>();
         private static readonly Dictionary<Type, Func<Designator, BuildableDef>> PlacingDefCache = new Dictionary<Type, Func<Designator, BuildableDef>>();
-        [ThreadStatic]
-        private static bool _allowSuccessSoundOnce;
         private static readonly Dictionary<Type, Func<Designator, SoundDef>> SuccessSoundGetterCache = new Dictionary<Type, Func<Designator, SoundDef>>();
         private static readonly Dictionary<string, SoundDef> SoundCache = new Dictionary<string, SoundDef>();
         private static Func<Designator> _selectedGetter;
@@ -35,23 +35,45 @@ namespace PerfectPlacement
         [ThreadStatic]
         private static bool _suppressMouseCellPin;
 
-        [ThreadStatic]
-        private static bool _suppressMouseAttachmentOnce;
+        private static readonly HashSet<string> DebugLoggedKeys = new HashSet<string>();
+
+        public static bool DebugEnabled => PerfectPlacement.Settings?.debugLogs ?? false;
+        public static void DebugLog(string msg)
+        {
+            try
+            {
+                if (!DebugEnabled) return;
+                Log.Message("[PerfectPlacement/Debug] " + msg);
+            }
+            catch { }
+        }
+        public static void DebugLog(System.Func<string> messageFactory)
+        {
+            try
+            {
+                if (!DebugEnabled) return;
+                if (messageFactory == null) return;
+                Log.Message("[PerfectPlacement/Debug] " + messageFactory());
+            }
+            catch { }
+        }
+        public static void DebugLogOnceForCurrentPin(Designator des, string tag, Func<string> messageFactory)
+        {
+            try
+            {
+                if (!DebugEnabled || des == null || messageFactory == null) return;
+                if (!TryGetPinSessionId(des, out var id)) return;
+                string key = id.ToString() + ":" + (tag ?? "");
+                if (DebugLoggedKeys.Add(key))
+                {
+                    DebugLog(messageFactory());
+                }
+            }
+            catch { }
+        }
 
         public static bool SuppressMouseCellPin => _suppressMouseCellPin;
-        public static void SuppressNextMouseAttachment()
-        {
-            _suppressMouseAttachmentOnce = true;
-        }
-        public static bool TryConsumeSuppressNextMouseAttachment()
-        {
-            if (_suppressMouseAttachmentOnce)
-            {
-                _suppressMouseAttachmentOnce = false;
-                return true;
-            }
-            return false;
-        }
+        // Removed: Mouse attachment suppression; we no longer suppress in-preview overlays/messages
 
         private static readonly Dictionary<Designator, IntVec3> LastMouseCell = new Dictionary<Designator, IntVec3>();
         private static readonly Dictionary<Designator, bool> RotatableDesignatorCache = new Dictionary<Designator, bool>();
@@ -81,6 +103,13 @@ namespace PerfectPlacement
 
             // Only allow mouse rotation for rotatable targets
             return IsRotatable(d);
+        }
+
+        public static bool TryGetPinSessionId(Designator d, out int id)
+        {
+            if (d != null && PinSessionId.TryGetValue(d, out id)) return true;
+            id = 0;
+            return false;
         }
 
         public static bool IsRotatable(Designator d)
@@ -142,7 +171,17 @@ namespace PerfectPlacement
                 {
                     var p = AccessTools.Property(t, name);
                     if (p != null && p.CanRead && typeof(BuildableDef).IsAssignableFrom(p.PropertyType))
-                        return des => p.GetValue(des, null) as BuildableDef;
+                    {
+                        var get = p.GetGetMethod(true);
+                        if (get != null)
+                        {
+                            var param = System.Linq.Expressions.Expression.Parameter(typeof(Designator), "d");
+                            var cast = System.Linq.Expressions.Expression.Convert(param, t);
+                            var call = System.Linq.Expressions.Expression.Call(cast, get);
+                            var asBuildable = System.Linq.Expressions.Expression.Convert(call, typeof(BuildableDef));
+                            return System.Linq.Expressions.Expression.Lambda<Func<Designator, BuildableDef>>(asBuildable, param).Compile();
+                        }
+                    }
                 }
                 // Then common field names
                 var fieldCandidates = new[] { "placingDef", "entDef", "buildableDef", "defToPlace" };
@@ -150,7 +189,13 @@ namespace PerfectPlacement
                 {
                     var f = AccessTools.Field(t, name);
                     if (f != null && typeof(BuildableDef).IsAssignableFrom(f.FieldType))
-                        return des => f.GetValue(des) as BuildableDef;
+                    {
+                        var param = System.Linq.Expressions.Expression.Parameter(typeof(Designator), "d");
+                        var cast = System.Linq.Expressions.Expression.Convert(param, t);
+                        var fld = System.Linq.Expressions.Expression.Field(cast, f);
+                        var asBuildable = System.Linq.Expressions.Expression.Convert(fld, typeof(BuildableDef));
+                        return System.Linq.Expressions.Expression.Lambda<Func<Designator, BuildableDef>>(asBuildable, param).Compile();
+                    }
                 }
                 // Fallback: any readable property/field of type BuildableDef on this type hierarchy
                 var tCur = t;
@@ -159,12 +204,28 @@ namespace PerfectPlacement
                     foreach (var p in tCur.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
                     {
                         if (p.CanRead && typeof(BuildableDef).IsAssignableFrom(p.PropertyType))
-                            return des => p.GetValue(des, null) as BuildableDef;
+                        {
+                            var get = p.GetGetMethod(true);
+                            if (get != null)
+                            {
+                                var param = System.Linq.Expressions.Expression.Parameter(typeof(Designator), "d");
+                                var cast = System.Linq.Expressions.Expression.Convert(param, tCur);
+                                var call = System.Linq.Expressions.Expression.Call(cast, get);
+                                var asBuildable = System.Linq.Expressions.Expression.Convert(call, typeof(BuildableDef));
+                                return System.Linq.Expressions.Expression.Lambda<Func<Designator, BuildableDef>>(asBuildable, param).Compile();
+                            }
+                        }
                     }
                     foreach (var f in tCur.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
                     {
                         if (typeof(BuildableDef).IsAssignableFrom(f.FieldType))
-                            return des => f.GetValue(des) as BuildableDef;
+                        {
+                            var param = System.Linq.Expressions.Expression.Parameter(typeof(Designator), "d");
+                            var cast = System.Linq.Expressions.Expression.Convert(param, tCur);
+                            var fld = System.Linq.Expressions.Expression.Field(cast, f);
+                            var asBuildable = System.Linq.Expressions.Expression.Convert(fld, typeof(BuildableDef));
+                            return System.Linq.Expressions.Expression.Lambda<Func<Designator, BuildableDef>>(asBuildable, param).Compile();
+                        }
                     }
                     tCur = tCur.BaseType;
                 }
@@ -194,12 +255,30 @@ namespace PerfectPlacement
         public static void SetPinned(Designator d, IntVec3 cell)
         {
             if (d == null) return;
+            bool isNew = !PinnedCell.ContainsKey(d);
             PinnedCell[d] = cell;
+            if (isNew)
+            {
+                PinSessionId[d] = NextPinSessionId++;
+                DebugLog(() => $"Pinned start: des={d.GetType().Name}, cell={cell}");
+            }
         }
         public static void ClearPinned(Designator d)
         {
             if (d == null) return;
             PinnedCell.Remove(d);
+            if (PinSessionId.TryGetValue(d, out var id))
+            {
+                PinSessionId.Remove(d);
+                DebugLog(() => $"Pinned end: des={d.GetType().Name}, session={id}");
+                try
+                {
+                    // Clean up any once-per-session debug keys
+                    var prefix = id.ToString() + ":";
+                    DebugLoggedKeys.RemoveWhere(k => k != null && k.StartsWith(prefix));
+                }
+                catch { }
+            }
         }
 
         public static void ClearRotatableCache()
@@ -217,6 +296,7 @@ namespace PerfectPlacement
         {
             if (d == null) return;
             PlacementArmed.Add(d);
+            DebugLog(() => $"Armed placement for des={d.GetType().Name}");
         }
         public static bool TryConsumePlacementArmed(Designator d)
         {
@@ -224,6 +304,7 @@ namespace PerfectPlacement
             if (PlacementArmed.Contains(d))
             {
                 PlacementArmed.Remove(d);
+                DebugLog(() => $"Consumed armed placement for des={d.GetType().Name}");
                 return true;
             }
             return false;
@@ -243,20 +324,16 @@ namespace PerfectPlacement
                 var dm = Find.DesignatorManager;
                 if (dm == null) return null;
                 var t = dm.GetType();
-                if (!SelectedGetterByMgrType.TryGetValue(t, out var runtimeGetter) || runtimeGetter == null)
+                if (!SelectedGetterByMgrType.TryGetValue(t, out var runtimeGetter))
                 {
                     runtimeGetter = BuildSelectedGetterForManagerType(t);
-                    SelectedGetterByMgrType[t] = runtimeGetter; // may be null
+                    SelectedGetterByMgrType[t] = runtimeGetter; // may be null; negative cache
                 }
                 if (runtimeGetter != null)
                 {
                     _selectedGetter = runtimeGetter;
                     return _selectedGetter();
                 }
-                var p = AccessTools.Property(t, "Selected") ?? AccessTools.Property(t, "SelectedDesignator");
-                if (p != null && p.CanRead) return p.GetValue(dm, null) as Designator;
-                var f = AccessTools.Field(t, "selected") ?? AccessTools.Field(t, "selectedDesignator");
-                if (f != null) return f.GetValue(dm) as Designator;
             }
             catch { }
             return null;
@@ -337,6 +414,39 @@ namespace PerfectPlacement
                         var dm = Find.DesignatorManager;
                         return dm != null ? compiled(dm) : null;
                     };
+                }
+                // Fallback: any readable property/field of type Designator on this manager type hierarchy
+                var tCur = mgrType;
+                while (tCur != null)
+                {
+                    foreach (var prop in tCur.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                    {
+                        if (!prop.CanRead) continue;
+                        if (!typeof(Designator).IsAssignableFrom(prop.PropertyType)) continue;
+                        var get = prop.GetGetMethod(true);
+                        if (get == null) continue;
+                        var del = AccessTools.MethodDelegate<Func<object, Designator>>(get);
+                        return () =>
+                        {
+                            var dm = Find.DesignatorManager;
+                            return dm != null ? del(dm) : null;
+                        };
+                    }
+                    foreach (var fldInfo in tCur.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                    {
+                        if (!typeof(Designator).IsAssignableFrom(fldInfo.FieldType)) continue;
+                        var paramObj = Expression.Parameter(typeof(object), "o");
+                        var castAny = Expression.Convert(paramObj, tCur);
+                        var fld2 = Expression.Field(castAny, fldInfo);
+                        var asDesignator2 = Expression.Convert(fld2, typeof(Designator));
+                        var compiled2 = Expression.Lambda<Func<object, Designator>>(asDesignator2, paramObj).Compile();
+                        return () =>
+                        {
+                            var dm = Find.DesignatorManager;
+                            return dm != null ? compiled2(dm) : null;
+                        };
+                    }
+                    tCur = tCur.BaseType;
                 }
             }
             catch { }
@@ -454,8 +564,14 @@ namespace PerfectPlacement
         {
             source = FindSourceThingForInstall(d);
             if (source == null) return false;
-            var inner = TryGetInnerThing(source);
-            return inner == null;
+            try
+            {
+                // Reinstall when not dealing with a MinifiedThing OR when the source is currently spawned on map
+                var inner = TryGetInnerThing(source);
+                if (inner == null) return true;
+                return source.Spawned;
+            }
+            catch { return false; }
         }
 
         public static Thing FindSourceThingForInstall(Designator d)
@@ -475,31 +591,76 @@ namespace PerfectPlacement
         {
             try
             {
+                // First try specific property names across the hierarchy
                 var propCandidates = new[] { "MiniToInstallOrBuildingToReinstall", "ThingToInstall" };
                 foreach (var propName in propCandidates)
                 {
-                    var p = AccessTools.Property(t, propName);
-                    if (p != null && p.CanRead && typeof(Thing).IsAssignableFrom(p.PropertyType))
-                        return des => p.GetValue(des, null) as Thing;
+                    var tCur = t;
+                    while (tCur != null)
+                    {
+                        var p = AccessTools.Property(tCur, propName);
+                        if (p != null && p.CanRead && typeof(Thing).IsAssignableFrom(p.PropertyType))
+                        {
+                            var get = p.GetGetMethod(true);
+                            if (get != null)
+                            {
+                                var param = System.Linq.Expressions.Expression.Parameter(typeof(Designator), "d");
+                                var cast = System.Linq.Expressions.Expression.Convert(param, tCur);
+                                var call = System.Linq.Expressions.Expression.Call(cast, get);
+                                var asThing = System.Linq.Expressions.Expression.Convert(call, typeof(Thing));
+                                return System.Linq.Expressions.Expression.Lambda<Func<Designator, Thing>>(asThing, param).Compile();
+                            }
+                        }
+                        tCur = tCur.BaseType;
+                    }
                 }
 
+                // Then try specific field names across the hierarchy
                 var fieldCandidates = new[] { "thingToInstall", "ent", "installThing", "minifiedThing", "reinstall", "miniToInstallOrBuildingToReinstall" };
                 foreach (var fieldName in fieldCandidates)
                 {
-                    var f = AccessTools.Field(t, fieldName);
-                    if (f != null && typeof(Thing).IsAssignableFrom(f.FieldType))
-                        return des => f.GetValue(des) as Thing;
+                    var tCur = t;
+                    while (tCur != null)
+                    {
+                        var f = AccessTools.Field(tCur, fieldName);
+                        if (f != null && typeof(Thing).IsAssignableFrom(f.FieldType))
+                        {
+                            var param = System.Linq.Expressions.Expression.Parameter(typeof(Designator), "d");
+                            var cast = System.Linq.Expressions.Expression.Convert(param, tCur);
+                            var fld = System.Linq.Expressions.Expression.Field(cast, f);
+                            var asThing = System.Linq.Expressions.Expression.Convert(fld, typeof(Thing));
+                            return System.Linq.Expressions.Expression.Lambda<Func<Designator, Thing>>(asThing, param).Compile();
+                        }
+                        tCur = tCur.BaseType;
+                    }
                 }
 
-                foreach (var f in t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                // Fallback: any readable property or field of type Thing across the hierarchy
+                var tScan = t;
+                while (tScan != null)
                 {
-                    if (typeof(Thing).IsAssignableFrom(f.FieldType))
-                        return des => f.GetValue(des) as Thing;
-                }
-                foreach (var p in t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-                {
-                    if (p.CanRead && typeof(Thing).IsAssignableFrom(p.PropertyType))
-                        return des => p.GetValue(des, null) as Thing;
+                    foreach (var p in tScan.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                    {
+                        if (!p.CanRead) continue;
+                        if (!typeof(Thing).IsAssignableFrom(p.PropertyType)) continue;
+                        var get = p.GetGetMethod(true);
+                        if (get == null) continue;
+                        var param = System.Linq.Expressions.Expression.Parameter(typeof(Designator), "d");
+                        var cast = System.Linq.Expressions.Expression.Convert(param, tScan);
+                        var call = System.Linq.Expressions.Expression.Call(cast, get);
+                        var asThing = System.Linq.Expressions.Expression.Convert(call, typeof(Thing));
+                        return System.Linq.Expressions.Expression.Lambda<Func<Designator, Thing>>(asThing, param).Compile();
+                    }
+                    foreach (var f in tScan.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
+                    {
+                        if (!typeof(Thing).IsAssignableFrom(f.FieldType)) continue;
+                        var param = System.Linq.Expressions.Expression.Parameter(typeof(Designator), "d");
+                        var cast = System.Linq.Expressions.Expression.Convert(param, tScan);
+                        var fld = System.Linq.Expressions.Expression.Field(cast, f);
+                        var asThing = System.Linq.Expressions.Expression.Convert(fld, typeof(Thing));
+                        return System.Linq.Expressions.Expression.Lambda<Func<Designator, Thing>>(asThing, param).Compile();
+                    }
+                    tScan = tScan.BaseType;
                 }
             }
             catch { }
@@ -577,11 +738,11 @@ namespace PerfectPlacement
             {
                 if (!TryGetPinned(des, out var pinCell))
                 {
-                    pinCell = GetActualMouseCell();
+                    var curAtDown = GetActualMouseCell();
+                    pinCell = curAtDown;
                     SetPinned(des, pinCell);
                     PlayPinSound(des);
-                    // Suppress any immediate mouse-attachment warnings on the pin frame
-                    SuppressNextMouseAttachment();
+                    DebugLog(() => $"Pin on MouseDown: des={des.GetType().Name}, cell={pinCell}");
                 }
                 var cur = GetActualMouseCell();
                 LastMouseCell[des] = cur;
@@ -595,6 +756,7 @@ namespace PerfectPlacement
                     {
                         SetAllPlacingRotFields(des, desired);
                         PlayRotateSound(des);
+                        DebugLog(() => $"Rotate via mouse: des={des.GetType().Name}, rot={desired}");
                     }
                 }
                 // Consume the click so vanilla doesn't attempt to place/select in GUI path
@@ -633,6 +795,7 @@ namespace PerfectPlacement
                                 {
                                     SetAllPlacingRotFields(des, newRot);
                                     PlayRotateSound(des);
+                                    DebugLog(() => $"Rotate via keyboard: des={des.GetType().Name}, rot={newRot}");
                                 }
                                 KeyboardOverrideUntilMove.Add(des);
                             }
@@ -651,6 +814,7 @@ namespace PerfectPlacement
                         {
                             SetAllPlacingRotFields(des, desired);
                             PlayRotateSound(des);
+                            DebugLog(() => $"Rotate via mouse move: des={des.GetType().Name}, rot={desired}");
                         }
                     }
                 }
@@ -660,6 +824,7 @@ namespace PerfectPlacement
             if (released && TryGetPinned(des, out var toPlace))
             {
                 var report = des.CanDesignateCell(toPlace);
+                DebugLog(() => $"MouseUp: attempting placement. des={des.GetType().Name}, cell={toPlace}, accepted={report.Accepted}, reason='{report.Reason ?? ""}'");
                 if (report.Accepted)
                 {
                     ArmPlacement(des);
@@ -667,6 +832,7 @@ namespace PerfectPlacement
                     // Vanilla success sound may not play in this deferred path; play it explicitly.
                     PlayDesignateSuccessSound(des);
                     UnmarkApplied(des);
+                    DebugLog(() => "Placement executed via deferred designate.");
                 }
                 else
                 {
@@ -675,13 +841,22 @@ namespace PerfectPlacement
                     {
                         if (!string.IsNullOrEmpty(report.Reason))
                         {
-                            // Message will show naturally since mouse is released
-                            Messages.Message(report.Reason, MessageTypeDefOf.RejectInput, historical: false);
+                            // Suppress noisy occupied/interaction messages; allow others
+                            if (!ShouldSuppressDesignatorReject(report.Reason, MessageTypeDefOf.RejectInput))
+                            {
+                                Messages.Message(report.Reason, MessageTypeDefOf.RejectInput, historical: false);
+                                DebugLog(() => $"Rejected placement shown: '{report.Reason}'");
+                            }
+                            else
+                            {
+                                DebugLog(() => $"Suppressed reject message: '{report.Reason}'");
+                            }
                         }
                     }
                     catch { }
-                    UnmarkApplied(des);
+                    // Do NOT unmark applied on failure; keep ghost rotation as last set.
                 }
+                // Always clear the pin state after handling placement/reject
                 ClearPinned(des);
                 LastMouseCell.Remove(des);
                 KeyboardOverrideUntilMove.Remove(des);
@@ -703,8 +878,7 @@ namespace PerfectPlacement
                 SetPinned(des, pin);
                 // Ensure pin sound plays when pin originates from DesignateSingleCell path
                 PlayPinSound(des);
-                // Suppress any immediate mouse-attachment warnings on the pin frame
-                SuppressNextMouseAttachment();
+                DebugLog(() => $"Pin via DesignateSingleCell path: des={des.GetType().Name}, cell={pin}");
                 return false;
             }
             if (TryGetPinned(des, out var _))
@@ -764,8 +938,7 @@ namespace PerfectPlacement
                 var pin = GetActualMouseCell();
                 SetPinned(des, pin);
                 PlayPinSound(des);
-                // Suppress any immediate mouse-attachment warnings on the pin frame
-                SuppressNextMouseAttachment();
+                DebugLog(() => $"Pin via ProcessInput path: des={des.GetType().Name}, cell={pin}");
             }
             if (evt != null && evt.type == EventType.MouseDown && evt.button == 0)
             {
@@ -778,6 +951,117 @@ namespace PerfectPlacement
         {
             // If we pinned on left-click, swallow original
             return !TryPinOnLeftClick(des, evt);
+        }
+
+        // Determine if a reject/placement message should be suppressed (e.g., SpaceAlreadyOccupied, InteractionSpotBlocked)
+        public static bool ShouldSuppressDesignatorReject(TaggedString text, MessageTypeDef type)
+        {
+            try
+            {
+                var actual = text.ToString();
+                return ShouldSuppressDesignatorReject(actual, type);
+            }
+            catch { return false; }
+        }
+
+        public static bool ShouldSuppressDesignatorReject(string text, MessageTypeDef type)
+        {
+            try
+            {
+                if (string.IsNullOrEmpty(text)) return false;
+                // Try against each known translation key we want to suppress
+                if (MatchesSuppressedKey(text, "SpaceAlreadyOccupied", out var key1))
+                {
+                    DebugLog(() => $"Suppressing message '{text}' (matches {key1})");
+                    return true;
+                }
+                if (MatchesSuppressedKey(text, "InteractionSpotBlocked", out var key2))
+                {
+                    DebugLog(() => $"Suppressing message '{text}' (matches {key2})");
+                    return true;
+                }
+                // Fallback: plain English prefix match in case translation lookup differs
+                if (text.IndexOf("Interaction spot is blocked", System.StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    DebugLog(() => $"Suppressing message '{text}' (fallback English match)");
+                    return true;
+                }
+                return false;
+            }
+            catch { return false; }
+        }
+
+        private static bool StringsEqualLoose(string a, string b)
+        {
+            if (a == null || b == null) return false;
+            // Basic normalization: trim and compare case-insensitively
+            var na = a.Trim();
+            var nb = b.Trim();
+            if (string.Equals(na, nb, System.StringComparison.OrdinalIgnoreCase)) return true;
+            // Be tolerant of trailing punctuation differences (e.g., ".")
+            na = na.TrimEnd('.', '!', ' ');
+            nb = nb.TrimEnd('.', '!', ' ');
+            return string.Equals(na, nb, System.StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool ContainsLoose(string haystack, string needle)
+        {
+            if (haystack == null || needle == null) return false;
+            // Quick insensitive contains, tolerant of punctuation at the end of the needle
+            var h = haystack.Trim();
+            var n = needle.Trim().TrimEnd('.', '!', ' ');
+            return h.IndexOf(n, System.StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static string RemoveBracedTokens(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            bool inBrace = false;
+            var sb = new System.Text.StringBuilder(s.Length);
+            foreach (var ch in s)
+            {
+                if (!inBrace)
+                {
+                    if (ch == '{') { inBrace = true; continue; }
+                    sb.Append(ch);
+                }
+                else
+                {
+                    if (ch == '}') inBrace = false;
+                }
+            }
+            return sb.ToString();
+        }
+
+        private static string NormalizeForContains(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return s;
+            s = RemoveBracedTokens(s);
+            // collapse excess spaces introduced by token removal
+            s = s.Replace("  ", " ");
+            return s.Trim();
+        }
+
+        private static bool MatchesSuppressedKey(string actual, string key, out string matchedKey)
+        {
+            matchedKey = null;
+            try
+            {
+                var t = key.Translate();
+                var translated = t.ToString();
+                if (string.IsNullOrEmpty(translated)) return false;
+                var needle = NormalizeForContains(translated);
+                var hay = actual?.Trim();
+                if (string.IsNullOrEmpty(needle) || string.IsNullOrEmpty(hay)) return false;
+                // Check equality and contains against normalized needle
+                if (StringsEqualLoose(hay, needle) || hay.IndexOf(needle, System.StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    matchedKey = key;
+                    return true;
+                }
+            }
+            catch { }
+            return false;
         }
 
         private static SoundDef ResolveSound(string defName)
@@ -793,10 +1077,7 @@ namespace PerfectPlacement
             catch { return null; }
         }
 
-        public static void AllowNextSuccessSound()
-        {
-            _allowSuccessSoundOnce = true;
-        }
+        // Removed: AllowNextSuccessSound — no global sound suppression remains
 
         private static Func<Designator, SoundDef> BuildSuccessSoundGetter(Type t)
         {
@@ -808,7 +1089,13 @@ namespace PerfectPlacement
                 {
                     var f = AccessTools.Field(tCur, "soundSucceeded");
                     if (f != null && typeof(SoundDef).IsAssignableFrom(f.FieldType))
-                        return des => f.GetValue(des) as SoundDef;
+                    {
+                        var param = System.Linq.Expressions.Expression.Parameter(typeof(Designator), "d");
+                        var cast = System.Linq.Expressions.Expression.Convert(param, tCur);
+                        var fld = System.Linq.Expressions.Expression.Field(cast, f);
+                        var asSd = System.Linq.Expressions.Expression.Convert(fld, typeof(SoundDef));
+                        return System.Linq.Expressions.Expression.Lambda<Func<Designator, SoundDef>>(asSd, param).Compile();
+                    }
                     tCur = tCur.BaseType;
                 }
                 tCur = t;
@@ -816,7 +1103,17 @@ namespace PerfectPlacement
                 {
                     var p = AccessTools.Property(tCur, "soundSucceeded");
                     if (p != null && p.CanRead && typeof(SoundDef).IsAssignableFrom(p.PropertyType))
-                        return des => p.GetValue(des, null) as SoundDef;
+                    {
+                        var get = p.GetGetMethod(true);
+                        if (get != null)
+                        {
+                            var param = System.Linq.Expressions.Expression.Parameter(typeof(Designator), "d");
+                            var cast = System.Linq.Expressions.Expression.Convert(param, tCur);
+                            var call = System.Linq.Expressions.Expression.Call(cast, get);
+                            var asSd = System.Linq.Expressions.Expression.Convert(call, typeof(SoundDef));
+                            return System.Linq.Expressions.Expression.Lambda<Func<Designator, SoundDef>>(asSd, param).Compile();
+                        }
+                    }
                     tCur = tCur.BaseType;
                 }
             }
@@ -845,8 +1142,6 @@ namespace PerfectPlacement
                 if (sd == null) sd = ResolveSound("Designate_Place");
                 if (sd != null)
                 {
-                    // Mark the next sound as allowed so our global suppression won't swallow it
-                    AllowNextSuccessSound();
                     var map = des?.Map ?? Find.CurrentMap;
                     SoundStarter.PlayOneShotOnCamera(sd, map);
                 }
@@ -854,36 +1149,7 @@ namespace PerfectPlacement
             catch { }
         }
 
-        public static bool ShouldSuppressPlacementSound(SoundDef sd)
-        {
-            try
-            {
-                if (sd == null) return false;
-                if (_allowSuccessSoundOnce)
-                {
-                    _allowSuccessSoundOnce = false;
-                    return false;
-                }
-                // Quick global check: if nothing pinned, don't suppress
-                if (!HasAnyPinned) return false;
-
-                // Quick name filters
-                if (sd.defName == "Designate_Place" || sd.defName == "Click")
-                    return true;
-
-                var s = PerfectPlacement.Settings;
-                if (s == null) return false;
-                var des = CurrentSelectedDesignator();
-                if (des == null) return false;
-                if (!MouseRotateEnabledFor(des, s)) return false;
-                if (!TryGetPinned(des, out var _)) return false;
-
-                var succ = TryGetDesignatorSuccessSound(des);
-                if (succ != null && ReferenceEquals(sd, succ)) return true;
-            }
-            catch { }
-            return false;
-        }
+        // Removed: ShouldSuppressPlacementSound since global sound suppression is no longer used
 
         public static void PlayPinSound(Designator des)
         {
@@ -892,8 +1158,6 @@ namespace PerfectPlacement
                 var sd = ResolveSound("Designate_DragBuilding_Start");
                 if (sd != null)
                 {
-                    // Ensure our pin sound isn't swallowed by suppression
-                    AllowNextSuccessSound();
                     var map = des?.Map ?? Find.CurrentMap;
                     SoundStarter.PlayOneShotOnCamera(sd, map);
                 }
@@ -905,8 +1169,6 @@ namespace PerfectPlacement
         {
             try
             {
-                // Ensure rotate sound isn't swallowed if suppression becomes broader
-                AllowNextSuccessSound();
                 // Use static UI drag slider sound for rotation feedback
                 SoundDefOf.DragSlider.PlayOneShotOnCamera();
             }

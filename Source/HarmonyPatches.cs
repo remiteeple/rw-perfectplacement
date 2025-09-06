@@ -187,6 +187,11 @@ namespace PerfectPlacement
                     {
                         var desiredKeep = source.Rotation;
                         if (Utilities.SetAllPlacingRotFields(__instance, desiredKeep)) Utilities.MarkApplied(__instance);
+                        else Utilities.DebugLog(() => $"KeepRotation: failed to set placingRot for {__instance.GetType().Name}");
+                    }
+                    else
+                    {
+                        Utilities.DebugLog(() => $"KeepRotation: not rotatable or null source. src={(source==null?"<null>":source.def.defName)}");
                     }
                 }
                 // Sims-like mouse rotation
@@ -462,32 +467,7 @@ namespace PerfectPlacement
         }
     }
 
-    [HarmonyPatch]
-    public static class Patch_SoundStarter_PlayOneShot_SuppressPlace
-    {
-        static IEnumerable<System.Reflection.MethodBase> TargetMethods()
-        {
-            var t = typeof(SoundStarter);
-            foreach (var mi in AccessTools.GetDeclaredMethods(t))
-            {
-                if (mi.Name != nameof(SoundStarter.PlayOneShotOnCamera) && mi.Name != nameof(SoundStarter.PlayOneShot))
-                    continue;
-                var pars = mi.GetParameters();
-                if (pars.Length >= 1 && pars[0].ParameterType == typeof(SoundDef))
-                    yield return mi;
-            }
-        }
-
-        public static bool Prefix(SoundDef soundDef)
-        {
-            try
-            {
-                if (Utilities.ShouldSuppressPlacementSound(soundDef)) return false;
-            }
-            catch { }
-            return true;
-        }
-    }
+    // Removed: sound suppression patch
 
     [HarmonyPatch]
     public static class Patch_Designator_ProcessInput_MouseRotate
@@ -552,6 +532,127 @@ namespace PerfectPlacement
             }
             catch { }
             return true; // Run original method
+        }
+    }
+
+    // Suppress the "SpaceAlreadyOccupied" reject message globally via Messages.Message overloads
+    [HarmonyPatch]
+    public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_Tagged_WithHistorical
+    {
+        static System.Reflection.MethodBase TargetMethod()
+        {
+            return AccessTools.Method(typeof(Messages), "Message", new[] { typeof(TaggedString), typeof(MessageTypeDef), typeof(bool) });
+        }
+        static bool Prepare() => TargetMethod() != null;
+        public static bool Prefix(TaggedString text, MessageTypeDef def, bool historical)
+        {
+            try { if (Utilities.ShouldSuppressDesignatorReject(text, def)) return false; } catch { }
+            return true;
+        }
+    }
+
+    [HarmonyPatch]
+    public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_String_WithHistorical
+    {
+        static System.Reflection.MethodBase TargetMethod()
+        {
+            return AccessTools.Method(typeof(Messages), "Message", new[] { typeof(string), typeof(MessageTypeDef), typeof(bool) });
+        }
+        static bool Prepare() => TargetMethod() != null;
+        public static bool Prefix(string text, MessageTypeDef def, bool historical)
+        {
+            try { if (Utilities.ShouldSuppressDesignatorReject(text, def)) return false; } catch { }
+            return true;
+        }
+    }
+
+    [HarmonyPatch]
+    public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_Tagged
+    {
+        static System.Reflection.MethodBase TargetMethod()
+        {
+            return AccessTools.Method(typeof(Messages), "Message", new[] { typeof(TaggedString), typeof(MessageTypeDef) });
+        }
+        static bool Prepare() => TargetMethod() != null;
+        public static bool Prefix(TaggedString text, MessageTypeDef def)
+        {
+            try { if (Utilities.ShouldSuppressDesignatorReject(text, def)) return false; } catch { }
+            return true;
+        }
+    }
+
+    [HarmonyPatch]
+    public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_String
+    {
+        static System.Reflection.MethodBase TargetMethod()
+        {
+            return AccessTools.Method(typeof(Messages), "Message", new[] { typeof(string), typeof(MessageTypeDef) });
+        }
+        static bool Prepare() => TargetMethod() != null;
+        public static bool Prefix(string text, MessageTypeDef def)
+        {
+            try { if (Utilities.ShouldSuppressDesignatorReject(text, def)) return false; } catch { }
+            return true;
+        }
+    }
+
+    [HarmonyPatch]
+    public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_Tagged_WithTargets_WithHistorical
+    {
+        static System.Reflection.MethodBase TargetMethod()
+        {
+            return AccessTools.Method(typeof(Messages), "Message", new[] { typeof(TaggedString), typeof(LookTargets), typeof(MessageTypeDef), typeof(bool) });
+        }
+        static bool Prepare() => TargetMethod() != null;
+        public static bool Prefix(TaggedString text, LookTargets lookTargets, MessageTypeDef def, bool historical)
+        {
+            try { if (Utilities.ShouldSuppressDesignatorReject(text, def)) return false; } catch { }
+            return true;
+        }
+    }
+
+    [HarmonyPatch]
+    public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_String_WithTargets_WithHistorical
+    {
+        static System.Reflection.MethodBase TargetMethod()
+        {
+            return AccessTools.Method(typeof(Messages), "Message", new[] { typeof(string), typeof(LookTargets), typeof(MessageTypeDef), typeof(bool) });
+        }
+        static bool Prepare() => TargetMethod() != null;
+        public static bool Prefix(string text, LookTargets lookTargets, MessageTypeDef def, bool historical)
+        {
+            try { if (Utilities.ShouldSuppressDesignatorReject(text, def)) return false; } catch { }
+            return true;
+        }
+    }
+
+    [HarmonyPatch]
+    public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_Tagged_WithTargets
+    {
+        static System.Reflection.MethodBase TargetMethod()
+        {
+            return AccessTools.Method(typeof(Messages), "Message", new[] { typeof(TaggedString), typeof(LookTargets), typeof(MessageTypeDef) });
+        }
+        static bool Prepare() => TargetMethod() != null;
+        public static bool Prefix(TaggedString text, LookTargets lookTargets, MessageTypeDef def)
+        {
+            try { if (Utilities.ShouldSuppressDesignatorReject(text, def)) return false; } catch { }
+            return true;
+        }
+    }
+
+    [HarmonyPatch]
+    public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_String_WithTargets
+    {
+        static System.Reflection.MethodBase TargetMethod()
+        {
+            return AccessTools.Method(typeof(Messages), "Message", new[] { typeof(string), typeof(LookTargets), typeof(MessageTypeDef) });
+        }
+        static bool Prepare() => TargetMethod() != null;
+        public static bool Prefix(string text, LookTargets lookTargets, MessageTypeDef def)
+        {
+            try { if (Utilities.ShouldSuppressDesignatorReject(text, def)) return false; } catch { }
+            return true;
         }
     }
 }

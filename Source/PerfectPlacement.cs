@@ -22,6 +22,7 @@ namespace PerfectPlacement
 
             // --- GLOBAL SETTINGS ---
             list.CheckboxLabeled("Enable Mouse Rotation", ref Settings.globalMouseRotate, "Hold left-click to pin an object and rotate it with the mouse.");
+            list.CheckboxLabeled("Enable Debug Logs", ref Settings.debugLogs, "Log suppression and placement flow details to help diagnose issues.");
             list.GapLine();
 
             // --- REINSTALL ---
@@ -79,6 +80,16 @@ namespace PerfectPlacement
             }
 
             list.End();
+        }
+
+        public override void WriteSettings()
+        {
+            base.WriteSettings();
+            try
+            {
+                Log.Message($"[PerfectPlacement] Debug logs now {(Settings.debugLogs ? "ENABLED" : "disabled")}.");
+            }
+            catch { }
         }
 
         private void DrawRotationWidget(Listing_Standard list, Rot4 currentRotation, System.Action<Rot4> setter)

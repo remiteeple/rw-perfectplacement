@@ -6,6 +6,7 @@ namespace PerfectPlacement
     {
         // Global
         public bool globalMouseRotate = true;
+        public bool debugLogs = false;
 
         // Reinstall
         public bool PerfectPlacement = true;
@@ -24,6 +25,7 @@ namespace PerfectPlacement
         {
             base.ExposeData();
             Scribe_Values.Look(ref globalMouseRotate, nameof(globalMouseRotate), true);
+            Scribe_Values.Look(ref debugLogs, nameof(debugLogs), false);
 
             Scribe_Values.Look(ref PerfectPlacement, nameof(PerfectPlacement), true);
             Scribe_Values.Look(ref useOverrideRotation, nameof(useOverrideRotation), false);
