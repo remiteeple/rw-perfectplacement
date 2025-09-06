@@ -516,18 +516,30 @@ namespace PerfectPlacement
         {
             try
             {
-                // Fast early-out: if nothing is pinned, run original
-                if (!Utilities.HasAnyPinned) return true;
+                var evt = Event.current;
                 var des = Utilities.CurrentSelectedDesignator();
-                if (des == null) return true;
-
                 var settings = PerfectPlacement.Settings;
-                if (settings == null) return true;
 
-                if (Utilities.MouseRotateEnabledFor(des, settings) && Event.current.type == EventType.MouseDown && Event.current.button == 0)
+                // Default: not suppressing for this event
+                Utilities.SetSuppressRejectsThisEvent(false);
+
+                // If this is a left mouse down and rotation is enabled+rotatable, mark suppress for this event
+                if (evt != null && evt.type == EventType.MouseDown && evt.button == 0 && des != null && settings != null)
                 {
-                    Event.current.Use();
-                    return false; // Skip original method
+                    if (Utilities.MouseRotateEnabledFor(des, settings) && Utilities.IsRotatable(des))
+                    {
+                        Utilities.SetSuppressRejectsThisEvent(true);
+                    }
+                }
+
+                // If we are already in a pinned rotate session, consume the MouseDown to prevent vanilla placement/select
+                if (Utilities.HasAnyPinned && des != null && settings != null)
+                {
+                    if (Utilities.MouseRotateEnabledFor(des, settings) && evt != null && evt.type == EventType.MouseDown && evt.button == 0)
+                    {
+                        evt.Use();
+                        return false; // Skip original method
+                    }
                 }
             }
             catch { }

@@ -34,6 +34,8 @@ namespace PerfectPlacement
 
         [ThreadStatic]
         private static bool _suppressMouseCellPin;
+        [ThreadStatic]
+        private static bool _suppressRejectsThisEvent;
 
         private static readonly HashSet<string> DebugLoggedKeys = new HashSet<string>();
 
@@ -73,6 +75,8 @@ namespace PerfectPlacement
         }
 
         public static bool SuppressMouseCellPin => _suppressMouseCellPin;
+        public static bool SuppressRejectsThisEvent => _suppressRejectsThisEvent;
+        public static void SetSuppressRejectsThisEvent(bool value) { _suppressRejectsThisEvent = value; }
         // Removed: Mouse attachment suppression; we no longer suppress in-preview overlays/messages
 
         private static readonly Dictionary<Designator, IntVec3> LastMouseCell = new Dictionary<Designator, IntVec3>();
@@ -841,16 +845,8 @@ namespace PerfectPlacement
                     {
                         if (!string.IsNullOrEmpty(report.Reason))
                         {
-                            // Suppress noisy occupied/interaction messages; allow others
-                            if (!ShouldSuppressDesignatorReject(report.Reason, MessageTypeDefOf.RejectInput))
-                            {
-                                Messages.Message(report.Reason, MessageTypeDefOf.RejectInput, historical: false);
-                                DebugLog(() => $"Rejected placement shown: '{report.Reason}'");
-                            }
-                            else
-                            {
-                                DebugLog(() => $"Suppressed reject message: '{report.Reason}'");
-                            }
+                            Messages.Message(report.Reason, MessageTypeDefOf.RejectInput, historical: false);
+                            DebugLog(() => $"Rejected placement shown: '{report.Reason}'");
                         }
                     }
                     catch { }
@@ -940,6 +936,8 @@ namespace PerfectPlacement
                 PlayPinSound(des);
                 DebugLog(() => $"Pin via ProcessInput path: des={des.GetType().Name}, cell={pin}");
             }
+            // Ensure reject messages are suppressed for this input event
+            SetSuppressRejectsThisEvent(true);
             if (evt != null && evt.type == EventType.MouseDown && evt.button == 0)
             {
                 try { evt.Use(); } catch { }
@@ -969,6 +967,13 @@ namespace PerfectPlacement
             try
             {
                 if (string.IsNullOrEmpty(text)) return false;
+                // Only suppress during an active or initiating mouse-rotation input event.
+                // - Initiation: flagged by DesignatorManager.ProcessInputEvents Prefix on MouseDown.
+                // - Active: when a pin exists and mouse is held/dragging.
+                bool rotateActive = SuppressRejectsThisEvent
+                    || (HasAnyPinned && (Input.GetMouseButton(0)
+                        || (Event.current != null && (Event.current.type == EventType.MouseDown || Event.current.type == EventType.MouseDrag))));
+                if (!rotateActive) return false;
                 // Try against each known translation key we want to suppress
                 if (MatchesSuppressedKey(text, "SpaceAlreadyOccupied", out var key1))
                 {
