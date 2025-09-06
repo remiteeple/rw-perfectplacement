@@ -985,6 +985,11 @@ namespace PerfectPlacement
                     DebugLog(() => $"Suppressing message '{text}' (matches {key2})");
                     return true;
                 }
+                if (MatchesSuppressedKey(text, "InteractionSpotBlockedBy", out var key3))
+                {
+                    DebugLog(() => $"Suppressing message '{text}' (matches {key3})");
+                    return true;
+                }
                 // Fallback: plain English prefix match in case translation lookup differs
                 if (text.IndexOf("Interaction spot is blocked", System.StringComparison.OrdinalIgnoreCase) >= 0)
                 {
