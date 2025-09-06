@@ -1,4 +1,4 @@
-<img align="left" width="128" height="128" src="https://github.com/remiteeple/PerfectPlacement/blob/main/About/Preview.png">
+<img align="left" width="128" height="128" src="https://github.com/remiteeple/PerfectPlacement/blob/main/About/ModIcon.png">
 
 ### Perfect Placement 
 
