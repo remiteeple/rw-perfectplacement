@@ -774,12 +774,31 @@ namespace PerfectPlacement
             {
                 var cur = GetActualMouseCell();
                 bool mouseMoved = !LastMouseCell.TryGetValue(des, out var last) || last != cur;
-                LastMouseCell[des] = cur;
-                if (mouseMoved) KeyboardOverrideUntilMove.Remove(des);
 
-                int dx = cur.x - pinned.x;
-                int dz = cur.z - pinned.z;
-                bool inDeadzone = Math.Abs(dx) <= MouseDeadzoneCells && Math.Abs(dz) <= MouseDeadzoneCells;
+                if (mouseMoved)
+                {
+                    LastMouseCell[des] = cur;
+                    KeyboardOverrideUntilMove.Remove(des);
+
+                    int dx = cur.x - pinned.x;
+                    int dz = cur.z - pinned.z;
+                    bool inDeadzone = Math.Abs(dx) <= MouseDeadzoneCells && Math.Abs(dz) <= MouseDeadzoneCells;
+
+                    // Mouse rotation if outside deadzone and no active keyboard override
+                    if (!inDeadzone && !KeyboardOverrideUntilMove.Contains(des))
+                    {
+                        if (dx != 0 || dz != 0)
+                        {
+                            var desired = DirectionFromDelta(dx, dz);
+                            if (!TryGetPlacingRot(des, out var curRot) || curRot != desired)
+                            {
+                                SetAllPlacingRotFields(des, desired);
+                                PlayRotateSound(des);
+                                DebugLog(() => $"Rotate via mouse move: des={des.GetType().Name}, rot={desired}");
+                            }
+                        }
+                    }
+                }
 
                 // Keyboard override: if not moving, allow Q/E to rotate instead of mouse
                 try
@@ -807,21 +826,6 @@ namespace PerfectPlacement
                     }
                 }
                 catch { }
-
-                // Mouse rotation if outside deadzone and no active keyboard override
-                if (mouseMoved && !inDeadzone && !KeyboardOverrideUntilMove.Contains(des))
-                {
-                    if (dx != 0 || dz != 0)
-                    {
-                        var desired = DirectionFromDelta(dx, dz);
-                        if (!TryGetPlacingRot(des, out var curRot) || curRot != desired)
-                        {
-                            SetAllPlacingRotFields(des, desired);
-                            PlayRotateSound(des);
-                            DebugLog(() => $"Rotate via mouse move: des={des.GetType().Name}, rot={desired}");
-                        }
-                    }
-                }
             }
 
             bool released = (evt != null && evt.type == EventType.MouseUp && evt.button == 0) || Input.GetMouseButtonUp(0);
