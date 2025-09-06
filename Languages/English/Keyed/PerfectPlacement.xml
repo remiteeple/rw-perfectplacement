@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LanguageData>
+  <!-- Mod settings category name -->
+  <PP.SettingsCategory>Perfect Placement</PP.SettingsCategory>
+
+  <!-- Global settings -->
+  <PP.EnableMouseRotation>Enable Mouse Rotation</PP.EnableMouseRotation>
+  <PP.EnableMouseRotation.Desc>Hold left-click to pin an object and rotate it with the mouse.</PP.EnableMouseRotation.Desc>
+
+  <PP.EnableDebugLogs>Enable Debug Logs</PP.EnableDebugLogs>
+  <PP.EnableDebugLogs.Desc>Log suppression and placement flow details to help diagnose issues.</PP.EnableDebugLogs.Desc>
+
+  <!-- Reinstall section -->
+  <PP.Section.Reinstall>When Reinstalling an object:</PP.Section.Reinstall>
+  <PP.Option.KeepOriginalRotation>Keep Original Rotation</PP.Option.KeepOriginalRotation>
+  <PP.Option.KeepOriginalRotation.Desc>When reinstalling, the object will keep its current rotation.</PP.Option.KeepOriginalRotation.Desc>
+  <PP.Option.ReinstallDirection>Reinstall Direction</PP.Option.ReinstallDirection>
+  <PP.Option.ReinstallDirection.Desc>When reinstalling, always force the object to a specific rotation.</PP.Option.ReinstallDirection.Desc>
+
+  <!-- Install section -->
+  <PP.Section.Install>When Installing a minified object:</PP.Section.Install>
+  <PP.Label.InstallDirection>Install Direction</PP.Label.InstallDirection>
+
+  <!-- Build section -->
+  <PP.Section.Build>When Building from the Architect menu:</PP.Section.Build>
+  <PP.Label.BuildDirection>Build Direction</PP.Label.BuildDirection>
+
+  <!-- Shared labels -->
+  <PP.Label.OverrideDirection>Override Direction</PP.Label.OverrideDirection>
+</LanguageData>
+

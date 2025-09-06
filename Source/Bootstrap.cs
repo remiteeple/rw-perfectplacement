@@ -17,6 +17,12 @@ namespace PerfectPlacement
                 var harmony = new Harmony(HarmonyId);
                 harmony.PatchAll(Assembly.GetExecutingAssembly());
                 Log.Message("[PerfectPlacement] Harmony initialized and patches applied");
+                try
+                {
+                    bool dbg = PerfectPlacement.Settings?.debugLogs ?? false;
+                    Log.Message($"[PerfectPlacement] Debug logs {(dbg ? "ENABLED" : "disabled")} at startup.");
+                }
+                catch { }
             }
             catch (Exception e)
             {
