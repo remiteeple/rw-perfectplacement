@@ -12,41 +12,56 @@ namespace PerfectPlacement
     [HarmonyPatch]
     public static class Patch_Designator_Place_get_placingRot
     {
-        static System.Reflection.MethodBase TargetMethod()
+        private static MethodBase _cachedTarget;
+        private static bool _isCached;
+
+        static MethodBase TargetMethod()
         {
+            if (_isCached) return _cachedTarget;
+
+            _isCached = true;
             var t = typeof(Designator_Place);
 
-            // Try direct property lookup first on this type
             var p = AccessTools.Property(t, "placingRot") ?? AccessTools.Property(t, "PlacingRot");
             var getter = p?.GetGetMethod(true);
-            if (getter != null) return getter;
+            if (getter != null)
+            {
+                _cachedTarget = getter;
+                return _cachedTarget;
+            }
 
-            // Fallback: look for explicit getter names on this type
             var m = AccessTools.Method(t, "get_placingRot") ?? AccessTools.Method(t, "get_PlacingRot");
-            if (m != null) return m;
+            if (m != null)
+            {
+                _cachedTarget = m;
+                return _cachedTarget;
+            }
 
-            // As a last resort, walk base types (unlikely but safe)
             var bt = t.BaseType;
             while (bt != null)
             {
                 var pb = AccessTools.Property(bt, "placingRot") ?? AccessTools.Property(bt, "PlacingRot");
                 var getb = pb?.GetGetMethod(true);
-                if (getb != null) return getb;
+                if (getb != null)
+                {
+                    _cachedTarget = getb;
+                    return _cachedTarget;
+                }
 
                 var mb = AccessTools.Method(bt, "get_placingRot") ?? AccessTools.Method(bt, "get_PlacingRot");
-                if (mb != null) return mb;
+                if (mb != null)
+                {
+                    _cachedTarget = mb;
+                    return _cachedTarget;
+                }
 
                 bt = bt.BaseType;
             }
 
-            return null; // Handled by Prepare() to skip cleanly
+            return null;
         }
 
-        // Skip patch entirely if getter is unavailable in this game version
-        static bool Prepare()
-        {
-            return TargetMethod() != null;
-        }
+        static bool Prepare() => TargetMethod() != null;
 
         public static void Postfix(Designator_Place __instance, ref Rot4 __result)
         {
@@ -69,32 +84,51 @@ namespace PerfectPlacement
     [HarmonyPatch]
     public static class Patch_Designator_Install_DesignateSingleCell_MouseRotate
     {
-        static System.Reflection.MethodBase TargetMethod()
+        private static MethodBase _cachedTarget;
+        private static bool _isCached;
+
+        static MethodBase TargetMethod()
         {
+            if (_isCached) return _cachedTarget;
+
+            _isCached = true;
             var t = typeof(Designator_Install);
-            // Prefer exact signature
             var m = AccessTools.Method(t, "DesignateSingleCell", new[] { typeof(IntVec3) });
-            if (m != null) return m;
-            // Fallback: any void method with IntVec3 parameter containing 'Designate'
+            if (m != null)
+            {
+                _cachedTarget = m;
+                return _cachedTarget;
+            }
+
             foreach (var mi in AccessTools.GetDeclaredMethods(t))
             {
                 if (!mi.Name.Contains("Designate")) continue;
                 var pars = mi.GetParameters();
                 if (pars.Length == 1 && pars[0].ParameterType == typeof(IntVec3) && mi.ReturnType == typeof(void))
-                    return mi;
+                {
+                    _cachedTarget = mi;
+                    return _cachedTarget;
+                }
             }
-            // Walk base types
+
             var bt = t.BaseType;
             while (bt != null)
             {
                 m = AccessTools.Method(bt, "DesignateSingleCell", new[] { typeof(IntVec3) });
-                if (m != null) return m;
+                if (m != null)
+                {
+                    _cachedTarget = m;
+                    return _cachedTarget;
+                }
                 foreach (var mi in AccessTools.GetDeclaredMethods(bt))
                 {
                     if (!mi.Name.Contains("Designate")) continue;
                     var pars = mi.GetParameters();
                     if (pars.Length == 1 && pars[0].ParameterType == typeof(IntVec3) && mi.ReturnType == typeof(void))
-                        return mi;
+                    {
+                        _cachedTarget = mi;
+                        return _cachedTarget;
+                    }
                 }
                 bt = bt.BaseType;
             }
@@ -116,9 +150,7 @@ namespace PerfectPlacement
         {
             var settings = PerfectPlacement.Settings;
             if (settings == null) return true;
-            // Allow callers to bypass pinning (e.g., when computing rotation from real cursor)
             if (Utilities.SuppressMouseCellPin) return true;
-            // Fast early-out: if nothing is pinned, no override needed
             if (!Utilities.HasAnyPinned) return true;
             try
             {
@@ -142,7 +174,6 @@ namespace PerfectPlacement
     {
         public static void Postfix(Designator des)
         {
-            // Reset initial-apply flag on selection so a reused designator gets a fresh initial rotation
             Utilities.UnmarkApplied(des);
             Utilities.ClearPinned(des);
             Utilities.ClearRotatableCache();
@@ -153,7 +184,6 @@ namespace PerfectPlacement
     [HarmonyPatch(typeof(Designator_Install), nameof(Designator_Install.SelectedUpdate))]
     public static class Patch_Designator_Install_SelectedUpdate
     {
-        // Early: consume MouseDown so base doesn't place/sound on press
         public static void Prefix(Designator __instance)
         {
             if (__instance == null) return;
@@ -175,13 +205,10 @@ namespace PerfectPlacement
                     : settings.installUseOverrideRotation;
                 if (!anyActive) return;
 
-                // Apply override once (Install/Reinstall); return early if applied
                 if (Utilities.ApplyInstallOrReinstallOverrideIfNeeded(__instance, settings, isReinstall)) return;
 
-                // PerfectPlacement: set initial rotation once, only for REINSTALL
                 if (isReinstall && settings.PerfectPlacement && !Utilities.WasApplied(__instance))
                 {
-                    // Only apply keep-rotation when the source is rotatable
                     bool rotatable = (source?.def as ThingDef)?.rotatable ?? false;
                     if (rotatable)
                     {
@@ -194,7 +221,6 @@ namespace PerfectPlacement
                         Utilities.DebugLog(() => $"KeepRotation: not rotatable or null source. src={(source==null?"<null>":source.def.defName)}");
                     }
                 }
-                // Sims-like mouse rotation
                 if (Utilities.HandleMouseRotate(__instance)) return;
             }
             catch (Exception e)
@@ -207,29 +233,49 @@ namespace PerfectPlacement
     [HarmonyPatch]
     public static class Patch_Designator_Place_DesignateSingleCell_MouseRotate
     {
-        static System.Reflection.MethodBase TargetMethod()
+        private static MethodBase _cachedTarget;
+        private static bool _isCached;
+
+        static MethodBase TargetMethod()
         {
+            if (_isCached) return _cachedTarget;
+
+            _isCached = true;
             var t = typeof(Designator_Place);
             var m = AccessTools.Method(t, "DesignateSingleCell", new[] { typeof(IntVec3) });
-            if (m != null) return m;
+            if (m != null)
+            {
+                _cachedTarget = m;
+                return _cachedTarget;
+            }
             foreach (var mi in AccessTools.GetDeclaredMethods(t))
             {
                 if (!mi.Name.Contains("Designate")) continue;
                 var pars = mi.GetParameters();
                 if (pars.Length == 1 && pars[0].ParameterType == typeof(IntVec3) && mi.ReturnType == typeof(void))
-                    return mi;
+                {
+                    _cachedTarget = mi;
+                    return _cachedTarget;
+                }
             }
             var bt = t.BaseType;
             while (bt != null)
             {
                 m = AccessTools.Method(bt, "DesignateSingleCell", new[] { typeof(IntVec3) });
-                if (m != null) return m;
+                if (m != null)
+                {
+                    _cachedTarget = m;
+                    return _cachedTarget;
+                }
                 foreach (var mi in AccessTools.GetDeclaredMethods(bt))
                 {
                     if (!mi.Name.Contains("Designate")) continue;
                     var pars = mi.GetParameters();
                     if (pars.Length == 1 && pars[0].ParameterType == typeof(IntVec3) && mi.ReturnType == typeof(void))
-                        return mi;
+                    {
+                        _cachedTarget = mi;
+                        return _cachedTarget;
+                    }
                 }
                 bt = bt.BaseType;
             }
@@ -263,9 +309,7 @@ namespace PerfectPlacement
                 bool anyActive = settings.buildUseOverrideRotation || Utilities.MouseRotateEnabledFor(__instance, settings);
                 if (!anyActive) return;
 
-                // Apply build override once; keep allowing mouse rotate after
                 Utilities.ApplyBuildOverrideIfNeeded(__instance, settings);
-                // Sims-like mouse rotation is centralized in Utils.HandleMouseRotate
                 if (Utilities.HandleMouseRotate(__instance)) return;
             }
             catch (Exception e)
@@ -278,29 +322,49 @@ namespace PerfectPlacement
     [HarmonyPatch]
     public static class Patch_Designator_Build_DesignateSingleCell_MouseRotate
     {
-        static System.Reflection.MethodBase TargetMethod()
+        private static MethodBase _cachedTarget;
+        private static bool _isCached;
+
+        static MethodBase TargetMethod()
         {
+            if (_isCached) return _cachedTarget;
+
+            _isCached = true;
             var t = typeof(Designator_Build);
             var m = AccessTools.Method(t, "DesignateSingleCell", new[] { typeof(IntVec3) });
-            if (m != null) return m;
+            if (m != null)
+            {
+                _cachedTarget = m;
+                return _cachedTarget;
+            }
             foreach (var mi in AccessTools.GetDeclaredMethods(t))
             {
                 if (!mi.Name.Contains("Designate")) continue;
                 var pars = mi.GetParameters();
                 if (pars.Length == 1 && pars[0].ParameterType == typeof(IntVec3) && mi.ReturnType == typeof(void))
-                    return mi;
+                {
+                    _cachedTarget = mi;
+                    return _cachedTarget;
+                }
             }
             var bt = t.BaseType;
             while (bt != null)
             {
                 m = AccessTools.Method(bt, "DesignateSingleCell", new[] { typeof(IntVec3) });
-                if (m != null) return m;
+                if (m != null)
+                {
+                    _cachedTarget = m;
+                    return _cachedTarget;
+                }
                 foreach (var mi in AccessTools.GetDeclaredMethods(bt))
                 {
                     if (!mi.Name.Contains("Designate")) continue;
                     var pars = mi.GetParameters();
                     if (pars.Length == 1 && pars[0].ParameterType == typeof(IntVec3) && mi.ReturnType == typeof(void))
-                        return mi;
+                    {
+                        _cachedTarget = mi;
+                        return _cachedTarget;
+                    }
                 }
                 bt = bt.BaseType;
             }
@@ -334,9 +398,7 @@ namespace PerfectPlacement
                 bool anyActive = settings.buildUseOverrideRotation || Utilities.MouseRotateEnabledFor(__instance, settings);
                 if (!anyActive) return;
 
-                // Apply build override once; keep allowing mouse rotate after
                 Utilities.ApplyBuildOverrideIfNeeded(__instance, settings);
-                // Sims-like mouse rotation is centralized in Utils.HandleMouseRotate
                 if (Utilities.HandleMouseRotate(__instance)) return;
             }
             catch (Exception e)
@@ -349,30 +411,49 @@ namespace PerfectPlacement
     [HarmonyPatch]
     public static class Patch_Designator_Place_ProcessInput_MouseRotate
     {
-        static System.Reflection.MethodBase TargetMethod()
+        private static MethodBase _cachedTarget;
+        private static bool _isCached;
+
+        static MethodBase TargetMethod()
         {
+            if (_isCached) return _cachedTarget;
+
+            _isCached = true;
             var t = typeof(Designator_Place);
-            // Prefer exact signature: void ProcessInput(Event)
             var m = AccessTools.Method(t, "ProcessInput", new[] { typeof(Event) });
-            if (m != null) return m;
+            if (m != null)
+            {
+                _cachedTarget = m;
+                return _cachedTarget;
+            }
             foreach (var mi in AccessTools.GetDeclaredMethods(t))
             {
                 if (mi.Name != "ProcessInput") continue;
                 var pars = mi.GetParameters();
                 if (pars.Length == 1 && pars[0].ParameterType == typeof(Event) && mi.ReturnType == typeof(void))
-                    return mi;
+                {
+                    _cachedTarget = mi;
+                    return _cachedTarget;
+                }
             }
             var bt = t.BaseType;
             while (bt != null)
             {
                 m = AccessTools.Method(bt, "ProcessInput", new[] { typeof(Event) });
-                if (m != null) return m;
+                if (m != null)
+                {
+                    _cachedTarget = m;
+                    return _cachedTarget;
+                }
                 foreach (var mi in AccessTools.GetDeclaredMethods(bt))
                 {
                     if (mi.Name != "ProcessInput") continue;
                     var pars = mi.GetParameters();
                     if (pars.Length == 1 && pars[0].ParameterType == typeof(Event) && mi.ReturnType == typeof(void))
-                        return mi;
+                    {
+                        _cachedTarget = mi;
+                        return _cachedTarget;
+                    }
                 }
                 bt = bt.BaseType;
             }
@@ -390,29 +471,49 @@ namespace PerfectPlacement
     [HarmonyPatch]
     public static class Patch_Designator_Build_ProcessInput_MouseRotate
     {
-        static System.Reflection.MethodBase TargetMethod()
+        private static MethodBase _cachedTarget;
+        private static bool _isCached;
+
+        static MethodBase TargetMethod()
         {
+            if (_isCached) return _cachedTarget;
+
+            _isCached = true;
             var t = typeof(Designator_Build);
             var m = AccessTools.Method(t, "ProcessInput", new[] { typeof(Event) });
-            if (m != null) return m;
+            if (m != null)
+            {
+                _cachedTarget = m;
+                return _cachedTarget;
+            }
             foreach (var mi in AccessTools.GetDeclaredMethods(t))
             {
                 if (mi.Name != "ProcessInput") continue;
                 var pars = mi.GetParameters();
                 if (pars.Length == 1 && pars[0].ParameterType == typeof(Event) && mi.ReturnType == typeof(void))
-                    return mi;
+                {
+                    _cachedTarget = mi;
+                    return _cachedTarget;
+                }
             }
             var bt = t.BaseType;
             while (bt != null)
             {
                 m = AccessTools.Method(bt, "ProcessInput", new[] { typeof(Event) });
-                if (m != null) return m;
+                if (m != null)
+                {
+                    _cachedTarget = m;
+                    return _cachedTarget;
+                }
                 foreach (var mi in AccessTools.GetDeclaredMethods(bt))
                 {
                     if (mi.Name != "ProcessInput") continue;
                     var pars = mi.GetParameters();
                     if (pars.Length == 1 && pars[0].ParameterType == typeof(Event) && mi.ReturnType == typeof(void))
-                        return mi;
+                    {
+                        _cachedTarget = mi;
+                        return _cachedTarget;
+                    }
                 }
                 bt = bt.BaseType;
             }
@@ -430,29 +531,49 @@ namespace PerfectPlacement
     [HarmonyPatch]
     public static class Patch_Designator_Install_ProcessInput_MouseRotate
     {
-        static System.Reflection.MethodBase TargetMethod()
+        private static MethodBase _cachedTarget;
+        private static bool _isCached;
+
+        static MethodBase TargetMethod()
         {
+            if (_isCached) return _cachedTarget;
+
+            _isCached = true;
             var t = typeof(Designator_Install);
             var m = AccessTools.Method(t, "ProcessInput", new[] { typeof(Event) });
-            if (m != null) return m;
+            if (m != null)
+            {
+                _cachedTarget = m;
+                return _cachedTarget;
+            }
             foreach (var mi in AccessTools.GetDeclaredMethods(t))
             {
                 if (mi.Name != "ProcessInput") continue;
                 var pars = mi.GetParameters();
                 if (pars.Length == 1 && pars[0].ParameterType == typeof(Event) && mi.ReturnType == typeof(void))
-                    return mi;
+                {
+                    _cachedTarget = mi;
+                    return _cachedTarget;
+                }
             }
             var bt = t.BaseType;
             while (bt != null)
             {
                 m = AccessTools.Method(bt, "ProcessInput", new[] { typeof(Event) });
-                if (m != null) return m;
+                if (m != null)
+                {
+                    _cachedTarget = m;
+                    return _cachedTarget;
+                }
                 foreach (var mi in AccessTools.GetDeclaredMethods(bt))
                 {
                     if (mi.Name != "ProcessInput") continue;
                     var pars = mi.GetParameters();
                     if (pars.Length == 1 && pars[0].ParameterType == typeof(Event) && mi.ReturnType == typeof(void))
-                        return mi;
+                    {
+                        _cachedTarget = mi;
+                        return _cachedTarget;
+                    }
                 }
                 bt = bt.BaseType;
             }
@@ -467,34 +588,52 @@ namespace PerfectPlacement
         }
     }
 
-    // Removed: sound suppression patch
-
     [HarmonyPatch]
     public static class Patch_Designator_ProcessInput_MouseRotate
     {
-        static System.Reflection.MethodBase TargetMethod()
+        private static MethodBase _cachedTarget;
+        private static bool _isCached;
+
+        static MethodBase TargetMethod()
         {
+            if (_isCached) return _cachedTarget;
+
+            _isCached = true;
             var t = typeof(Designator);
             var m = AccessTools.Method(t, "ProcessInput", new[] { typeof(Event) });
-            if (m != null) return m;
+            if (m != null)
+            {
+                _cachedTarget = m;
+                return _cachedTarget;
+            }
             foreach (var mi in AccessTools.GetDeclaredMethods(t))
             {
                 if (mi.Name != "ProcessInput") continue;
                 var pars = mi.GetParameters();
                 if (pars.Length == 1 && pars[0].ParameterType == typeof(Event) && mi.ReturnType == typeof(void))
-                    return mi;
+                {
+                    _cachedTarget = mi;
+                    return _cachedTarget;
+                }
             }
             var bt = t.BaseType;
             while (bt != null)
             {
                 m = AccessTools.Method(bt, "ProcessInput", new[] { typeof(Event) });
-                if (m != null) return m;
+                if (m != null)
+                {
+                    _cachedTarget = m;
+                    return _cachedTarget;
+                }
                 foreach (var mi in AccessTools.GetDeclaredMethods(bt))
                 {
                     if (mi.Name != "ProcessInput") continue;
                     var pars = mi.GetParameters();
                     if (pars.Length == 1 && pars[0].ParameterType == typeof(Event) && mi.ReturnType == typeof(void))
-                        return mi;
+                    {
+                        _cachedTarget = mi;
+                        return _cachedTarget;
+                    }
                 }
                 bt = bt.BaseType;
             }
@@ -520,10 +659,8 @@ namespace PerfectPlacement
                 var des = Utilities.CurrentSelectedDesignator();
                 var settings = PerfectPlacement.Settings;
 
-                // Default: not suppressing for this event
                 Utilities.SetSuppressRejectsThisEvent(false);
 
-                // If this is a left mouse down and rotation is enabled+rotatable, mark suppress for this event
                 if (evt != null && evt.type == EventType.MouseDown && evt.button == 0 && des != null && settings != null)
                 {
                     if (Utilities.MouseRotateEnabledFor(des, settings) && Utilities.IsRotatable(des))
@@ -532,28 +669,32 @@ namespace PerfectPlacement
                     }
                 }
 
-                // If we are already in a pinned rotate session, consume the MouseDown to prevent vanilla placement/select
                 if (Utilities.HasAnyPinned && des != null && settings != null)
                 {
                     if (Utilities.MouseRotateEnabledFor(des, settings) && evt != null && evt.type == EventType.MouseDown && evt.button == 0)
                     {
                         evt.Use();
-                        return false; // Skip original method
+                        return false;
                     }
                 }
             }
             catch { }
-            return true; // Run original method
+            return true;
         }
     }
 
-    // Suppress the "SpaceAlreadyOccupied" reject message globally via Messages.Message overloads
     [HarmonyPatch]
     public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_Tagged_WithHistorical
     {
-        static System.Reflection.MethodBase TargetMethod()
+        private static MethodBase _cachedTarget;
+        private static bool _isCached;
+
+        static MethodBase TargetMethod()
         {
-            return AccessTools.Method(typeof(Messages), "Message", new[] { typeof(TaggedString), typeof(MessageTypeDef), typeof(bool) });
+            if (_isCached) return _cachedTarget;
+            _isCached = true;
+            _cachedTarget = AccessTools.Method(typeof(Messages), "Message", new[] { typeof(TaggedString), typeof(MessageTypeDef), typeof(bool) });
+            return _cachedTarget;
         }
         static bool Prepare() => TargetMethod() != null;
         public static bool Prefix(TaggedString text, MessageTypeDef def, bool historical)
@@ -566,9 +707,15 @@ namespace PerfectPlacement
     [HarmonyPatch]
     public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_String_WithHistorical
     {
-        static System.Reflection.MethodBase TargetMethod()
+        private static MethodBase _cachedTarget;
+        private static bool _isCached;
+
+        static MethodBase TargetMethod()
         {
-            return AccessTools.Method(typeof(Messages), "Message", new[] { typeof(string), typeof(MessageTypeDef), typeof(bool) });
+            if (_isCached) return _cachedTarget;
+            _isCached = true;
+            _cachedTarget = AccessTools.Method(typeof(Messages), "Message", new[] { typeof(string), typeof(MessageTypeDef), typeof(bool) });
+            return _cachedTarget;
         }
         static bool Prepare() => TargetMethod() != null;
         public static bool Prefix(string text, MessageTypeDef def, bool historical)
@@ -581,9 +728,15 @@ namespace PerfectPlacement
     [HarmonyPatch]
     public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_Tagged
     {
-        static System.Reflection.MethodBase TargetMethod()
+        private static MethodBase _cachedTarget;
+        private static bool _isCached;
+
+        static MethodBase TargetMethod()
         {
-            return AccessTools.Method(typeof(Messages), "Message", new[] { typeof(TaggedString), typeof(MessageTypeDef) });
+            if (_isCached) return _cachedTarget;
+            _isCached = true;
+            _cachedTarget = AccessTools.Method(typeof(Messages), "Message", new[] { typeof(TaggedString), typeof(MessageTypeDef) });
+            return _cachedTarget;
         }
         static bool Prepare() => TargetMethod() != null;
         public static bool Prefix(TaggedString text, MessageTypeDef def)
@@ -596,9 +749,15 @@ namespace PerfectPlacement
     [HarmonyPatch]
     public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_String
     {
-        static System.Reflection.MethodBase TargetMethod()
+        private static MethodBase _cachedTarget;
+        private static bool _isCached;
+
+        static MethodBase TargetMethod()
         {
-            return AccessTools.Method(typeof(Messages), "Message", new[] { typeof(string), typeof(MessageTypeDef) });
+            if (_isCached) return _cachedTarget;
+            _isCached = true;
+            _cachedTarget = AccessTools.Method(typeof(Messages), "Message", new[] { typeof(string), typeof(MessageTypeDef) });
+            return _cachedTarget;
         }
         static bool Prepare() => TargetMethod() != null;
         public static bool Prefix(string text, MessageTypeDef def)
@@ -611,9 +770,15 @@ namespace PerfectPlacement
     [HarmonyPatch]
     public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_Tagged_WithTargets_WithHistorical
     {
-        static System.Reflection.MethodBase TargetMethod()
+        private static MethodBase _cachedTarget;
+        private static bool _isCached;
+
+        static MethodBase TargetMethod()
         {
-            return AccessTools.Method(typeof(Messages), "Message", new[] { typeof(TaggedString), typeof(LookTargets), typeof(MessageTypeDef), typeof(bool) });
+            if (_isCached) return _cachedTarget;
+            _isCached = true;
+            _cachedTarget = AccessTools.Method(typeof(Messages), "Message", new[] { typeof(TaggedString), typeof(LookTargets), typeof(MessageTypeDef), typeof(bool) });
+            return _cachedTarget;
         }
         static bool Prepare() => TargetMethod() != null;
         public static bool Prefix(TaggedString text, LookTargets lookTargets, MessageTypeDef def, bool historical)
@@ -626,9 +791,15 @@ namespace PerfectPlacement
     [HarmonyPatch]
     public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_String_WithTargets_WithHistorical
     {
-        static System.Reflection.MethodBase TargetMethod()
+        private static MethodBase _cachedTarget;
+        private static bool _isCached;
+
+        static MethodBase TargetMethod()
         {
-            return AccessTools.Method(typeof(Messages), "Message", new[] { typeof(string), typeof(LookTargets), typeof(MessageTypeDef), typeof(bool) });
+            if (_isCached) return _cachedTarget;
+            _isCached = true;
+            _cachedTarget = AccessTools.Method(typeof(Messages), "Message", new[] { typeof(string), typeof(LookTargets), typeof(MessageTypeDef), typeof(bool) });
+            return _cachedTarget;
         }
         static bool Prepare() => TargetMethod() != null;
         public static bool Prefix(string text, LookTargets lookTargets, MessageTypeDef def, bool historical)
@@ -641,9 +812,15 @@ namespace PerfectPlacement
     [HarmonyPatch]
     public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_Tagged_WithTargets
     {
-        static System.Reflection.MethodBase TargetMethod()
+        private static MethodBase _cachedTarget;
+        private static bool _isCached;
+
+        static MethodBase TargetMethod()
         {
-            return AccessTools.Method(typeof(Messages), "Message", new[] { typeof(TaggedString), typeof(LookTargets), typeof(MessageTypeDef) });
+            if (_isCached) return _cachedTarget;
+            _isCached = true;
+            _cachedTarget = AccessTools.Method(typeof(Messages), "Message", new[] { typeof(TaggedString), typeof(LookTargets), typeof(MessageTypeDef) });
+            return _cachedTarget;
         }
         static bool Prepare() => TargetMethod() != null;
         public static bool Prefix(TaggedString text, LookTargets lookTargets, MessageTypeDef def)
@@ -656,9 +833,15 @@ namespace PerfectPlacement
     [HarmonyPatch]
     public static class Patch_Messages_Message_Suppress_SpaceAlreadyOccupied_String_WithTargets
     {
-        static System.Reflection.MethodBase TargetMethod()
+        private static MethodBase _cachedTarget;
+        private static bool _isCached;
+
+        static MethodBase TargetMethod()
         {
-            return AccessTools.Method(typeof(Messages), "Message", new[] { typeof(string), typeof(LookTargets), typeof(MessageTypeDef) });
+            if (_isCached) return _cachedTarget;
+            _isCached = true;
+            _cachedTarget = AccessTools.Method(typeof(Messages), "Message", new[] { typeof(string), typeof(LookTargets), typeof(MessageTypeDef) });
+            return _cachedTarget;
         }
         static bool Prepare() => TargetMethod() != null;
         public static bool Prefix(string text, LookTargets lookTargets, MessageTypeDef def)
