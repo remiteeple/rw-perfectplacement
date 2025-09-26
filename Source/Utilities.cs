@@ -18,8 +18,6 @@ namespace PerfectPlacement
         private static readonly Dictionary<Designator, IntVec3> PinnedCell = new Dictionary<Designator, IntVec3>();
         private static readonly Dictionary<Designator, int> PinSessionId = new Dictionary<Designator, int>();
         private static int NextPinSessionId = 1;
-        private static readonly HashSet<Designator> PlacementArmed = new HashSet<Designator>();
-
         // Cache for expensive reflection lookups
         private static readonly Dictionary<Type, Action<Designator, Rot4>> SetRotCache = new Dictionary<Type, Action<Designator, Rot4>>();
         private static readonly Dictionary<Type, Func<Designator, Rot4>> GetRotCache = new Dictionary<Type, Func<Designator, Rot4>>();
@@ -41,8 +39,6 @@ namespace PerfectPlacement
 
         [ThreadStatic]
         private static bool _suppressMouseCellPin;
-        [ThreadStatic]
-        private static bool _suppressRejectsThisEvent;
 
         private static readonly HashSet<string> DebugLoggedKeys = new HashSet<string>();
 
@@ -82,8 +78,6 @@ namespace PerfectPlacement
         }
 
         public static bool SuppressMouseCellPin => _suppressMouseCellPin;
-        public static bool SuppressRejectsThisEvent => _suppressRejectsThisEvent;
-        public static void SetSuppressRejectsThisEvent(bool value) { _suppressRejectsThisEvent = value; }
         // Removed: Mouse attachment suppression; we no longer suppress in-preview overlays/messages
 
         private static readonly Dictionary<Designator, IntVec3> LastMouseCell = new Dictionary<Designator, IntVec3>();
@@ -318,24 +312,6 @@ namespace PerfectPlacement
         {
             LastMouseCell.Clear();
             KeyboardOverrideUntilMove.Clear();
-        }
-
-        public static void ArmPlacement(Designator d)
-        {
-            if (d == null) return;
-            PlacementArmed.Add(d);
-            DebugLog(() => $"Armed placement for des={d.GetType().Name}");
-        }
-        public static bool TryConsumePlacementArmed(Designator d)
-        {
-            if (d == null) return false;
-            if (PlacementArmed.Contains(d))
-            {
-                PlacementArmed.Remove(d);
-                DebugLog(() => $"Consumed armed placement for des={d.GetType().Name}");
-                return true;
-            }
-            return false;
         }
 
         public static Designator CurrentSelectedDesignator()
@@ -876,7 +852,6 @@ namespace PerfectPlacement
                 DebugLog(() => $"MouseUp: attempting placement. des={des.GetType().Name}, cell={toPlace}, accepted={report.Accepted}, reason='{report.Reason ?? ""}'");
                 if (report.Accepted)
                 {
-                    ArmPlacement(des);
                     des.DesignateSingleCell(toPlace);
                     // Vanilla success sound may not play in this deferred path; play it explicitly.
                     PlayDesignateSuccessSound(des);
@@ -905,30 +880,6 @@ namespace PerfectPlacement
                 return true;
             }
             return false;
-        }
-
-        public static bool HandleDesignatePrefix(Designator des)
-        {
-            var settings = PerfectPlacement.Settings;
-            if (settings == null) return true;
-            bool enabled = MouseRotateEnabledFor(des, settings);
-            if (!enabled) return true;
-            if (!TryGetPinned(des, out var _))
-            {
-                var pin = GetActualMouseCell();
-                SetPinned(des, pin);
-                // Ensure pin sound plays when pin originates from DesignateSingleCell path
-                PlayPinSound(des);
-                DebugLog(() => $"Pin via DesignateSingleCell path: des={des.GetType().Name}, cell={pin}");
-                return false;
-            }
-            if (TryGetPinned(des, out var _))
-            {
-                if (TryConsumePlacementArmed(des))
-                    return true;
-                return false;
-            }
-            return true;
         }
 
         public static bool ApplyOverrideOnce(Designator des, Rot4 desired)
@@ -969,155 +920,115 @@ namespace PerfectPlacement
             return ApplyOverrideOnce(des, s.buildOverrideRotation);
         }
 
-        private static bool TryPinOnLeftClick(Designator des, Event evt)
-        {
-            var s = PerfectPlacement.Settings;
-            if (s == null) return false;
-            if (!MouseRotateEnabledFor(des, s)) return false;
-            bool mouseDownNow = (evt != null && evt.type == EventType.MouseDown && evt.button == 0) || Input.GetMouseButtonDown(0);
-            if (!mouseDownNow) return false;
-            if (!TryGetPinned(des, out var _))
-            {
-                var pin = GetActualMouseCell();
-                SetPinned(des, pin);
-                PlayPinSound(des);
-                DebugLog(() => $"Pin via ProcessInput path: des={des.GetType().Name}, cell={pin}");
-            }
-            // Ensure reject messages are suppressed for this input event
-            SetSuppressRejectsThisEvent(true);
-            if (evt != null && evt.type == EventType.MouseDown && evt.button == 0)
-            {
-                try { evt.Use(); } catch { }
-            }
-            return true;
-        }
-
-        public static bool HandleProcessInputPrefix(Designator des, Event evt)
-        {
-            // If we pinned on left-click, swallow original
-            return !TryPinOnLeftClick(des, evt);
-        }
-
-        // Determine if a reject/placement message should be suppressed (e.g., SpaceAlreadyOccupied, InteractionSpotBlocked)
-        public static bool ShouldSuppressDesignatorReject(TaggedString text, MessageTypeDef type)
+        public static bool HandleProcessInputEvents(DesignatorManager manager)
         {
             try
             {
-                var actual = text.ToString();
-                return ShouldSuppressDesignatorReject(actual, type);
-            }
-            catch { return false; }
-        }
+                var evt = Event.current;
+                if (manager == null || evt == null) return false;
+                var settings = PerfectPlacement.Settings;
+                if (settings == null) return false;
+                var des = manager.SelectedDesignator;
+                if (des == null) return false;
+                if (!MouseRotateEnabledFor(des, settings) || !IsRotatable(des)) return false;
 
-        public static bool ShouldSuppressDesignatorReject(string text, MessageTypeDef type)
-        {
-            try
-            {
-                if (string.IsNullOrEmpty(text)) return false;
-                // Only suppress during an active or initiating mouse-rotation input event.
-                // - Initiation: flagged by DesignatorManager.ProcessInputEvents Prefix on MouseDown.
-                // - Active: when a pin exists and mouse is held/dragging.
-                bool rotateActive = SuppressRejectsThisEvent
-                    || (HasAnyPinned && (Input.GetMouseButton(0)
-                        || (Event.current != null && (Event.current.type == EventType.MouseDown || Event.current.type == EventType.MouseDrag))));
-                if (!rotateActive) return false;
-                // Try against each known translation key we want to suppress
-                if (MatchesSuppressedKey(text, "SpaceAlreadyOccupied", out var key1))
+                if (evt.type == EventType.MouseDown && evt.button == 0)
                 {
-                    DebugLog(() => $"Suppressing message '{text}' (matches {key1})");
+                    if (!TryGetPinned(des, out _))
+                    {
+                        var pin = GetActualMouseCell();
+                        SetPinned(des, pin);
+                        PlayPinSound(des);
+                        DebugLog(() => $"Pin via ProcessInputEvents: des={des.GetType().Name}, cell={pin}");
+                    }
+                    evt.Use();
                     return true;
                 }
-                if (MatchesSuppressedKey(text, "InteractionSpotBlocked", out var key2))
-                {
-                    DebugLog(() => $"Suppressing message '{text}' (matches {key2})");
-                    return true;
-                }
-                if (MatchesSuppressedKey(text, "InteractionSpotBlockedBy", out var key3))
-                {
-                    DebugLog(() => $"Suppressing message '{text}' (matches {key3})");
-                    return true;
-                }
-                if (MatchesSuppressedKey(text, "IdenticalThingExists", out var key4))
-                {
-                    DebugLog(() => $"Suppressing message '{text}' (matches {key4})");
-                    return true;
-                }
-                return false;
-            }
-            catch { return false; }
-        }
 
-        private static bool StringsEqualLoose(string a, string b)
-        {
-            if (a == null || b == null) return false;
-            // Basic normalization: trim and compare case-insensitively
-            var na = a.Trim();
-            var nb = b.Trim();
-            if (string.Equals(na, nb, System.StringComparison.OrdinalIgnoreCase)) return true;
-            // Be tolerant of trailing punctuation differences (e.g., ".")
-            na = na.TrimEnd('.', '!', ' ');
-            nb = nb.TrimEnd('.', '!', ' ');
-            return string.Equals(na, nb, System.StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static bool ContainsLoose(string haystack, string needle)
-        {
-            if (haystack == null || needle == null) return false;
-            // Quick insensitive contains, tolerant of punctuation at the end of the needle
-            var h = haystack.Trim();
-            var n = needle.Trim().TrimEnd('.', '!', ' ');
-            return h.IndexOf(n, System.StringComparison.OrdinalIgnoreCase) >= 0;
-        }
-
-        private static string RemoveBracedTokens(string s)
-        {
-            if (string.IsNullOrEmpty(s)) return s;
-            bool inBrace = false;
-            var sb = new System.Text.StringBuilder(s.Length);
-            foreach (var ch in s)
-            {
-                if (!inBrace)
+                if (evt.button == 0 && TryGetPinned(des, out _))
                 {
-                    if (ch == '{') { inBrace = true; continue; }
-                    sb.Append(ch);
-                }
-                else
-                {
-                    if (ch == '}') inBrace = false;
-                }
-            }
-            return sb.ToString();
-        }
-
-        private static string NormalizeForContains(string s)
-        {
-            if (string.IsNullOrEmpty(s)) return s;
-            s = RemoveBracedTokens(s);
-            // collapse excess spaces introduced by token removal
-            s = s.Replace("  ", " ");
-            return s.Trim();
-        }
-
-        private static bool MatchesSuppressedKey(string actual, string key, out string matchedKey)
-        {
-            matchedKey = null;
-            try
-            {
-                var t = key.Translate();
-                var translated = t.ToString();
-                if (string.IsNullOrEmpty(translated)) return false;
-                var needle = NormalizeForContains(translated);
-                var hay = actual?.Trim();
-                if (string.IsNullOrEmpty(needle) || string.IsNullOrEmpty(hay)) return false;
-                // Check equality and contains against normalized needle
-                if (StringsEqualLoose(hay, needle) || hay.IndexOf(needle, System.StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    matchedKey = key;
-                    return true;
+                    if (evt.type == EventType.MouseDrag || evt.type == EventType.MouseUp)
+                    {
+                        evt.Use();
+                        return true;
+                    }
                 }
             }
             catch { }
             return false;
+        }
+
+        public static void HandleDesignatorUpdate(Designator des)
+        {
+            var settings = PerfectPlacement.Settings;
+            if (des == null || settings == null) return;
+
+            if (des is Designator_Install)
+            {
+                HandleInstallUpdate(des, settings);
+                return;
+            }
+
+            if (des is Designator_Build)
+            {
+                HandleBuildUpdate(des, settings);
+                return;
+            }
+
+            if (MouseRotateEnabledFor(des, settings))
+            {
+                HandleMouseRotate(des);
+            }
+        }
+
+        private static void HandleBuildUpdate(Designator des, PerfectPlacementSettings settings)
+        {
+            bool buildOverrideActive = settings.buildOverrideRotation != Rot4.South;
+            bool rotateActive = MouseRotateEnabledFor(des, settings);
+            if (!buildOverrideActive && !rotateActive) return;
+
+            if (buildOverrideActive)
+            {
+                ApplyBuildOverrideIfNeeded(des, settings);
+            }
+
+            HandleMouseRotate(des);
+        }
+
+        private static void HandleInstallUpdate(Designator des, PerfectPlacementSettings settings)
+        {
+            bool isReinstall = IsReinstallDesignator(des, out var source);
+            bool mouseRotate = MouseRotateEnabledFor(des, settings);
+
+            bool anyActive = isReinstall
+                ? (settings.useOverrideRotation || settings.PerfectPlacement || mouseRotate)
+                : (settings.installOverrideRotation != Rot4.South || mouseRotate);
+
+            if (!anyActive) return;
+
+            if (ApplyInstallOrReinstallOverrideIfNeeded(des, settings, isReinstall)) return;
+
+            if (isReinstall && settings.PerfectPlacement && !WasApplied(des))
+            {
+                if (IsRotatable(des))
+                {
+                    var desiredKeep = source.Rotation;
+                    if (SetAllPlacingRotFields(des, desiredKeep))
+                    {
+                        MarkApplied(des);
+                    }
+                    else
+                    {
+                        DebugLog(() => $"KeepRotation: failed to set placingRot for {des.GetType().Name}");
+                    }
+                }
+                else
+                {
+                    DebugLog(() => $"KeepRotation: not rotatable or null source. src={(source == null ? "<null>" : source.def.defName)}");
+                }
+            }
+
+            HandleMouseRotate(des);
         }
 
         private static SoundDef ResolveSound(string defName)
@@ -1231,9 +1142,5 @@ namespace PerfectPlacement
             catch { }
         }
 
-        public static void ConsumeLeftClickIfMouseRotate(Designator des)
-        {
-            TryPinOnLeftClick(des, Event.current);
-        }
     }
 }
