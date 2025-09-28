@@ -92,6 +92,23 @@ namespace PerfectPlacement
             Utilities.ClearPinned(des);
             Utilities.ClearRotatableCache();
             Utilities.ClearTransientAll();
+
+            try
+            {
+                var settings = PerfectPlacement.Settings;
+                if (settings?.PerfectPlacement == true && des != null && !settings.useOverrideRotation)
+                {
+                    if (Utilities.IsReinstallDesignator(des, out var source) && source != null && Utilities.IsRotatable(des))
+                    {
+                        var desired = source.Rotation;
+                        if (Utilities.SetAllPlacingRotFields(des, desired))
+                        {
+                            Utilities.MarkApplied(des);
+                        }
+                    }
+                }
+            }
+            catch { }
         }
     }
 
