@@ -96,6 +96,7 @@ namespace PerfectPlacement
             try
             {
                 var settings = PerfectPlacement.Settings;
+                Utilities.ApplyBuildCopyOnSelect(des, settings);
                 if (settings?.PerfectPlacement == true && des != null && !settings.useOverrideRotation)
                 {
                     if (Utilities.IsReinstallDesignator(des, out var source) && source != null && Utilities.IsRotatable(des))
@@ -173,4 +174,28 @@ namespace PerfectPlacement
     }
 
 
+    [HarmonyPatch(typeof(BuildCopyCommandUtility), nameof(BuildCopyCommandUtility.BuildCopyCommand))]
+    public static class Patch_BuildCopyCommandUtility_BuildCopyCommand
+    {
+        public static void Postfix(BuildableDef buildable, Command __result)
+        {
+            try
+            {
+                if (__result is Command_Action action)
+                {
+                    var original = action.action;
+                    action.action = () =>
+                    {
+                        try
+                        {
+                            Utilities.RegisterBuildCopyFromSelection(buildable);
+                        }
+                        catch { }
+                        original?.Invoke();
+                    };
+                }
+            }
+            catch { }
+        }
+    }
 }

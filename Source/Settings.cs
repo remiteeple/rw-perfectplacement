@@ -2,6 +2,12 @@ using Verse;
 
 namespace PerfectPlacement
 {
+    public enum BuildCopyRotationMode
+    {
+        KeepSource,
+        Override
+    }
+
     public class PerfectPlacementSettings : ModSettings
     {
         // Global
@@ -19,6 +25,10 @@ namespace PerfectPlacement
         // Build
         public Rot4 buildOverrideRotation = Rot4.South;
 
+        // Build Copy
+        public BuildCopyRotationMode buildCopyMode = BuildCopyRotationMode.KeepSource;
+        public Rot4 buildCopyOverrideRotation = Rot4.South;
+
         public override void ExposeData()
         {
             base.ExposeData();
@@ -32,6 +42,9 @@ namespace PerfectPlacement
             Scribe_Values.Look(ref installOverrideRotation, nameof(installOverrideRotation), Rot4.South);
 
             Scribe_Values.Look(ref buildOverrideRotation, nameof(buildOverrideRotation), Rot4.South);
+
+            Scribe_Values.Look(ref buildCopyMode, nameof(buildCopyMode), BuildCopyRotationMode.KeepSource);
+            Scribe_Values.Look(ref buildCopyOverrideRotation, nameof(buildCopyOverrideRotation), Rot4.South);
         }
     }
 }
