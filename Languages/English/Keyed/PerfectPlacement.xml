@@ -25,7 +25,14 @@
   <PP.Section.Build>When Building from the Architect menu:</PP.Section.Build>
   <PP.Label.BuildDirection>Build Direction</PP.Label.BuildDirection>
 
+  <!-- Build copy section -->
+  <PP.Section.BuildCopy>When using Build Copy:</PP.Section.BuildCopy>
+  <PP.Option.BuildCopy.Keep>Keep copied rotation</PP.Option.BuildCopy.Keep>
+  <PP.Option.BuildCopy.Keep.Desc>Apply the copied object's current rotation to the blueprint.</PP.Option.BuildCopy.Keep.Desc>
+  <PP.Option.BuildCopy.Override>Override copy rotation</PP.Option.BuildCopy.Override>
+  <PP.Option.BuildCopy.Override.Desc>Force copied blueprints to use a specific rotation.</PP.Option.BuildCopy.Override.Desc>
   <!-- Shared labels -->
   <PP.Label.OverrideDirection>Override Direction</PP.Label.OverrideDirection>
 </LanguageData>
+
 

@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using System.Collections.Generic;
+using System.Linq;
 using HarmonyLib;
 using System.Linq.Expressions;
 using RimWorld;
@@ -30,6 +31,14 @@ namespace PerfectPlacement
         private static readonly Dictionary<Type, Func<Designator>> SelectedGetterByMgrType = new Dictionary<Type, Func<Designator>>();
         private static readonly Dictionary<Type, Func<Thing, Thing>> InnerThingGetterCache = new Dictionary<Type, Func<Thing, Thing>>();
 
+        private struct BuildCopySnapshot
+        {
+            public BuildableDef Buildable;
+            public Rot4 SourceRotation;
+            public bool HasSourceRotation;
+        }
+
+        private static BuildCopySnapshot? PendingBuildCopy;
         private class CacheData
         {
             public bool? IsReinstall;
@@ -77,6 +86,121 @@ namespace PerfectPlacement
             catch { }
         }
 
+        public static void RegisterBuildCopyFromSelection(BuildableDef buildable)
+        {
+            if (buildable == null)
+            {
+                PendingBuildCopy = null;
+                return;
+            }
+
+            Thing source = null;
+            try
+            {
+                var selector = Find.Selector;
+                if (selector != null)
+                {
+                    source = selector.SingleSelectedThing;
+                    if (source == null)
+                    {
+                        source = selector.SelectedObjects?.OfType<Thing>().FirstOrDefault();
+                    }
+                }
+            }
+            catch
+            {
+                source = null;
+            }
+
+            Rot4 sourceRot = Rot4.South;
+            bool hasSourceRot = false;
+            if (source != null)
+            {
+                try
+                {
+                    sourceRot = source.Rotation;
+                    hasSourceRot = true;
+                }
+                catch { }
+            }
+
+            PendingBuildCopy = new BuildCopySnapshot
+            {
+                Buildable = buildable,
+                SourceRotation = sourceRot,
+                HasSourceRotation = hasSourceRot
+            };
+
+            DebugLog(() => $"Register build copy: buildable={buildable?.defName ?? "<null>"}, source={(source != null ? source.GetType().Name : "<none>")}, rot={(hasSourceRot ? sourceRot.ToString() : "<unknown>")}");
+        }
+
+        public static void ApplyBuildCopyOnSelect(Designator des, PerfectPlacementSettings settings)
+        {
+            var snapshotOpt = PendingBuildCopy;
+            PendingBuildCopy = null;
+
+            if (!snapshotOpt.HasValue)
+            {
+                return;
+            }
+
+            if (des == null || settings == null || des is not Designator_Build)
+            {
+                return;
+            }
+
+            var snapshot = snapshotOpt.Value;
+            var placingDef = FindPlacingDef(des);
+            if (snapshot.Buildable != null && placingDef != null && snapshot.Buildable != placingDef)
+            {
+                DebugLog(() => $"Build copy def mismatch: snapshot={snapshot.Buildable?.defName ?? "<null>"}, placing={placingDef?.defName ?? "<null>"}");
+            }
+
+            bool keepMode = settings.buildCopyMode == BuildCopyRotationMode.KeepSource;
+            bool overrideMode = settings.buildCopyMode == BuildCopyRotationMode.Override;
+
+            Rot4 desired = snapshot.SourceRotation;
+            bool shouldApply = false;
+            bool handled = false;
+
+            if (overrideMode)
+            {
+                desired = settings.buildCopyOverrideRotation;
+                shouldApply = true;
+            }
+            else if (keepMode && snapshot.HasSourceRotation)
+            {
+                shouldApply = true;
+            }
+
+            if (shouldApply && IsRotatable(des))
+            {
+                if (ApplyOverrideOnce(des, desired))
+                {
+                    DebugLog(() => $"Build copy rotation applied ({desired}) for {placingDef?.defName ?? des.GetType().Name}");
+                }
+                else
+                {
+                    DebugLog(() => $"Build copy rotation already applied ({desired}) for {placingDef?.defName ?? des.GetType().Name}");
+                }
+                handled = true;
+            }
+            else if (overrideMode)
+            {
+                DebugLog(() => $"Build copy override skipped for {placingDef?.defName ?? des.GetType().Name} (not rotatable)");
+                handled = true;
+            }
+            else if (keepMode)
+            {
+                DebugLog(() => $"Build copy keep-mode no rotation source for {placingDef?.defName ?? des.GetType().Name}");
+                handled = true;
+            }
+
+            if (handled)
+            {
+                MarkApplied(des);
+            }
+        }
         public static bool SuppressMouseCellPin => _suppressMouseCellPin;
         // Removed: Mouse attachment suppression; we no longer suppress in-preview overlays/messages
 

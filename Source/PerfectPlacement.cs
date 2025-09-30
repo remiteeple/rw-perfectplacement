@@ -109,6 +109,31 @@ namespace PerfectPlacement
                 Find.WindowStack.Add(new FloatMenu(opts));
             }
 
+            list.GapLine();
+
+            // --- BUILD COPY ---
+            Text.Font = GameFont.Medium;
+            list.Label("PP.Section.BuildCopy".Translate());
+            Text.Font = GameFont.Small;
+            list.Gap(6f);
+
+            bool buildCopyKeep = Settings.buildCopyMode == BuildCopyRotationMode.KeepSource;
+            bool buildCopyOverride = Settings.buildCopyMode == BuildCopyRotationMode.Override;
+
+            if (list.RadioButton("PP.Option.BuildCopy.Keep".Translate(), buildCopyKeep, tooltip: "PP.Option.BuildCopy.Keep.Desc".Translate()))
+            {
+                Settings.buildCopyMode = BuildCopyRotationMode.KeepSource;
+            }
+
+            if (list.RadioButton("PP.Option.BuildCopy.Override".Translate(), buildCopyOverride, tooltip: "PP.Option.BuildCopy.Override.Desc".Translate()))
+            {
+                Settings.buildCopyMode = BuildCopyRotationMode.Override;
+            }
+
+            if (Settings.buildCopyMode == BuildCopyRotationMode.Override)
+            {
+                DrawRotationWidget(list, Settings.buildCopyOverrideRotation, newRot => Settings.buildCopyOverrideRotation = newRot);
+            }
             list.End();
         }
 
@@ -143,3 +168,4 @@ namespace PerfectPlacement
         }
     }
 }
+
