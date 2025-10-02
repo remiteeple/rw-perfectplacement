@@ -17,8 +17,6 @@ namespace PerfectPlacement
         private const int MouseDeadzoneCells = 1; // small deadzone around pinned origin
         private static readonly ConditionalWeakTable<Designator, object> AppliedOnce = new ConditionalWeakTable<Designator, object>();
         private static readonly Dictionary<Designator, IntVec3> PinnedCell = new Dictionary<Designator, IntVec3>();
-        private static readonly Dictionary<Designator, int> PinSessionId = new Dictionary<Designator, int>();
-        private static int NextPinSessionId = 1;
         // Cache for expensive reflection lookups
         private static readonly Dictionary<Type, Action<Designator, Rot4>> SetRotCache = new Dictionary<Type, Action<Designator, Rot4>>();
         private static readonly Dictionary<Type, Func<Designator, Rot4>> GetRotCache = new Dictionary<Type, Func<Designator, Rot4>>();
@@ -49,7 +47,6 @@ namespace PerfectPlacement
         [ThreadStatic]
         private static bool _suppressMouseCellPin;
 
-        private static readonly HashSet<string> DebugLoggedKeys = new HashSet<string>();
 
         public static bool DebugEnabled => PerfectPlacement.Settings?.debugLogs ?? false;
         public static void DebugLog(string msg)
@@ -71,21 +68,6 @@ namespace PerfectPlacement
             }
             catch { }
         }
-        public static void DebugLogOnceForCurrentPin(Designator des, string tag, Func<string> messageFactory)
-        {
-            try
-            {
-                if (!DebugEnabled || des == null || messageFactory == null) return;
-                if (!TryGetPinSessionId(des, out var id)) return;
-                string key = id.ToString() + ":" + (tag ?? "");
-                if (DebugLoggedKeys.Add(key))
-                {
-                    DebugLog(messageFactory());
-                }
-            }
-            catch { }
-        }
-
         public static void RegisterBuildCopyFromSelection(BuildableDef buildable)
         {
             if (buildable == null)
@@ -232,13 +214,6 @@ namespace PerfectPlacement
 
             // Only allow mouse rotation for rotatable targets
             return IsRotatable(d);
-        }
-
-        public static bool TryGetPinSessionId(Designator d, out int id)
-        {
-            if (d != null && PinSessionId.TryGetValue(d, out id)) return true;
-            id = 0;
-            return false;
         }
 
         public static bool IsRotatable(Designator d)
@@ -402,25 +377,15 @@ namespace PerfectPlacement
             PinnedCell[d] = cell;
             if (isNew)
             {
-                PinSessionId[d] = NextPinSessionId++;
                 DebugLog(() => $"Pinned start: des={d.GetType().Name}, cell={cell}");
             }
         }
         public static void ClearPinned(Designator d)
         {
             if (d == null) return;
-            PinnedCell.Remove(d);
-            if (PinSessionId.TryGetValue(d, out var id))
+            if (PinnedCell.Remove(d))
             {
-                PinSessionId.Remove(d);
-                DebugLog(() => $"Pinned end: des={d.GetType().Name}, session={id}");
-                try
-                {
-                    // Clean up any once-per-session debug keys
-                    var prefix = id.ToString() + ":";
-                    DebugLoggedKeys.RemoveWhere(k => k != null && k.StartsWith(prefix));
-                }
-                catch { }
+                DebugLog(() => $"Pinned end: des={d.GetType().Name}");
             }
         }
 
@@ -1268,3 +1233,4 @@ namespace PerfectPlacement
 
     }
 }
+
